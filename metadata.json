@@ -1,0 +1,6 @@
+{
+  "name": "Electronic Schematic & Circuit Board Designer",
+  "description": "An EasyEDA-inspired electronic schematic editor and circuit board diagram tool with AI prompt-based schematic creation, real-time voltage and current simulation, virtual oscilloscope, component test settings, netlist inspection, and export tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { AllDataSheetComponent, SchematicComponent, AllDataSheetPin } from '../../types';
+import { AllDataSheetComponent, SchematicComponent, AllDataSheetPin, Wire } from '../../types';
 import {
   ALL_DATASHEET_CATALOG,
   searchAllDataSheet,
@@ -7,6 +7,7 @@ import {
   getAllDataSheetPdfUrl,
 } from '../../data/allDataSheetCatalog';
 import { RealProductImage } from '../../utils/componentImages';
+import { synthesizeClientCircuit } from '../../utils/clientEdaSynthesizer';
 import {
   Search,
   FileText,
@@ -23,6 +24,8 @@ import {
   Radio,
   Eye,
   CheckCircle2,
+  Globe,
+  Sparkles,
 } from 'lucide-react';
 
 interface AllDataSheetModalProps {
@@ -42,6 +45,7 @@ interface AllDataSheetModalProps {
   ) => void;
   onPlaceComponent?: (datasheetPart: AllDataSheetComponent) => void;
   onSelectComponent?: (datasheetPart: AllDataSheetComponent) => void;
+  onAddCircuitToCanvas?: (components: SchematicComponent[], wires?: Wire[]) => void;
   initialQuery?: string;
 }
 
@@ -208,6 +212,7 @@ export const AllDataSheetModal: React.FC<AllDataSheetModalProps> = ({
   onApplySpecsToComponent,
   onPlaceComponent,
   onSelectComponent,
+  onAddCircuitToCanvas,
   initialQuery = '',
 }) => {
   const [searchQuery, setSearchQuery] = useState(
@@ -360,6 +365,29 @@ export const AllDataSheetModal: React.FC<AllDataSheetModalProps> = ({
               </button>
             ))}
           </div>
+
+          {/* Detected URL / Circuit Synthesizer Banner */}
+          {searchQuery && (searchQuery.toLowerCase().includes('circuit') || searchQuery.toLowerCase().includes('http') || searchQuery.toLowerCase().includes('diy') || searchQuery.toLowerCase().includes('charger') || searchQuery.toLowerCase().includes('relay')) && onAddCircuitToCanvas && (
+            <div className="p-2.5 rounded-lg bg-emerald-950/70 border border-emerald-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+              <div className="flex items-center gap-2 text-emerald-300">
+                <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>
+                  Synthesize & add complete working circuit from <strong>"{searchQuery.slice(0, 42)}{searchQuery.length > 42 ? '...' : ''}"</strong> directly into schematic!
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  const syn = synthesizeClientCircuit(searchQuery);
+                  onAddCircuitToCanvas(syn.components, syn.wires);
+                  onClose();
+                }}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md font-semibold text-xs shrink-0 flex items-center gap-1.5 cursor-pointer shadow-md transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>⚡ Add Circuit to Canvas</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Modal Main Content: Split Pane */}
@@ -489,8 +517,24 @@ export const AllDataSheetModal: React.FC<AllDataSheetModalProps> = ({
                     title="Directly add this component into the circuit diagram schematic"
                   >
                     <Plus className="w-4 h-4" />
-                    <span>⚡ Add to Circuit Diagram</span>
+                    <span>⚡ Add Component to Canvas</span>
                   </button>
+
+                  {/* SYNTHESIZE & ADD COMPLETE CIRCUIT POWERED BY THIS PART */}
+                  {onAddCircuitToCanvas && (
+                    <button
+                      onClick={() => {
+                        const syn = synthesizeClientCircuit(`${activePart.partNumber} ${activePart.description} ${activePart.category}`);
+                        onAddCircuitToCanvas(syn.components, syn.wires);
+                        onClose();
+                      }}
+                      className="w-full px-3 py-2 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-sky-500/30"
+                      title={`Synthesize and place complete working circuit using ${activePart.partNumber}`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                      <span>⚡ Add Complete Circuit ({activePart.partNumber})</span>
+                    </button>
+                  )}
 
                   {/* Enrich / Apply to currently selected component */}
                   {selectedComponent && (

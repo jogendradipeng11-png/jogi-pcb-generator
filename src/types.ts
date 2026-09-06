@@ -321,5 +321,13 @@ export interface GoogleSearchResultItem {
     components: SchematicComponent[];
     wires?: Wire[];
   };
+  // Detailed identified parts list on the circuit or component module
+  identifiedParts?: {
+    designator: string;
+    value: string;
+    type?: string;
+    footprint?: string;
+    description?: string;
+  }[];
 }
 

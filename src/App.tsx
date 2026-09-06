@@ -4,6 +4,7 @@ import {
   EditorTool,
   CanvasViewMode,
   ComponentDefinition,
+  PinDefinition,
   Point,
   SchematicComponent,
   Wire,
@@ -15,7 +16,7 @@ import {
   CircuitRotationDirection,
 } from './types';
 import { STARTER_CIRCUITS } from './data/examples';
-import { getComponentDef } from './data/components';
+import { getComponentDef, registerCustomComponentDef, COMPONENT_CATALOG } from './data/components';
 import { Header } from './components/layout/Header';
 import { SchematicCanvas } from './components/schematic/SchematicCanvas';
 import { PcbCanvas } from './components/pcb/PcbCanvas';
@@ -396,6 +397,44 @@ export default function App() {
       const currentComps = safeDoc.components || [];
       const currentWires = safeDoc.wires || [];
 
+      // Ensure every new component has a valid definition registered so it renders cleanly
+      newComponents.forEach((c) => {
+        const existing = COMPONENT_CATALOG.find((def) => def.type === c.type);
+        if (!existing) {
+          const pinCount = (c.pins || []).length;
+          const half = Math.max(1, Math.ceil(pinCount / 2));
+          const pins: PinDefinition[] = (c.pins || []).map((p, idx) => {
+            const isLeft = pinCount <= 2 ? idx === 0 : idx < half;
+            const rowIdx = isLeft ? idx : idx - half;
+            const yOffset = (rowIdx - (half - 1) / 2) * 20;
+            return {
+              id: p.id,
+              name: p.name,
+              x: isLeft ? -45 : 45,
+              y: Math.round(yOffset),
+              direction: isLeft ? 'left' : 'right',
+              type: 'passive',
+            };
+          });
+          registerCustomComponentDef({
+            type: c.type,
+            name: c.value || c.type,
+            prefix: c.designator ? c.designator.replace(/[0-9]/g, '') : 'U',
+            category: 'modules',
+            defaultVal: c.value,
+            defaultFootprint: c.footprint || 'MODULE_STANDARD',
+            width: 90,
+            height: Math.max(60, half * 22 + 20),
+            pins: pins.length > 0 ? pins : [
+              { id: '1', name: '1', x: -40, y: 0, direction: 'left', type: 'passive' },
+              { id: '2', name: '2', x: 40, y: 0, direction: 'right', type: 'passive' },
+            ],
+            description: c.datasheetDescription || c.value,
+            symbol: 'generic_ic',
+          });
+        }
+      });
+
       // Find an offset so it doesn't directly overlap existing components
       const maxX = currentComps.length > 0 
         ? Math.max(...currentComps.map((c) => c.x)) + 160 
@@ -419,7 +458,7 @@ export default function App() {
         };
       });
 
-      const placedWires: Wire[] = (newWires || []).map((w) => {
+      let placedWires: Wire[] = (newWires || []).map((w) => {
         return {
           ...w,
           id: `wire_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -436,6 +475,12 @@ export default function App() {
         };
       });
 
+      // If newWires was empty or zero, auto-route nets between placed components
+      if (placedWires.length === 0 && placedComponents.some((c) => (c.pins || []).some((p) => p.net))) {
+        const routed = autoRouteSchematicNets(placedComponents, []);
+        placedWires = routed.newWires;
+      }
+
       const updated = sanitizeDocument({
         ...safeDoc,
         components: [...currentComps, ...placedComponents],
@@ -445,9 +490,26 @@ export default function App() {
 
       commitDocumentChange(updated);
       setSelectedCompIds(placedComponents.map((c) => c.id));
-      setToastMessage(`Added circuit with ${placedComponents.length} components to schematic!`);
+      setSelectedWireIds([]);
+      setActiveTool('select');
+
+      // Smoothly center canvas viewport on newly placed circuit
+      if (placedComponents.length > 0) {
+        const minPlacedX = Math.min(...placedComponents.map((c) => c.x));
+        const maxPlacedX = Math.max(...placedComponents.map((c) => c.x));
+        const minPlacedY = Math.min(...placedComponents.map((c) => c.y));
+        const maxPlacedY = Math.max(...placedComponents.map((c) => c.y));
+        const midX = (minPlacedX + maxPlacedX) / 2;
+        const midY = (minPlacedY + maxPlacedY) / 2;
+        setPan({
+          x: Math.round(400 - midX * zoom),
+          y: Math.round(260 - midY * zoom),
+        });
+      }
+
+      setToastMessage(`⚡ Added circuit with ${placedComponents.length} components to schematic!`);
     },
-    [safeDoc, commitDocumentChange]
+    [safeDoc, zoom, commitDocumentChange]
   );
 
   // Open AllDataSheet Search Modal
@@ -487,25 +549,66 @@ export default function App() {
         placeY += 40;
       }
 
-      const symbolType = part.schematicSymbolType || 'ic_generic';
-      const compDef = getComponentDef(symbolType);
+      // Dynamically create and register custom component definition with physical pin locations
+      const cleanPartName = (part.partNumber || 'PART').replace(/[^a-zA-Z0-9]/g, '_');
+      const customType = `ads_${cleanPartName.toLowerCase()}_${Date.now().toString(36)}`;
+      
+      const pinCount = (part.pinout && part.pinout.length > 0) ? part.pinout.length : 8;
+      const isDualRow = pinCount >= 4;
+      const half = Math.ceil(pinCount / 2);
+      const rowSpacing = 22;
+      const boxHeight = Math.max(70, half * rowSpacing + 28);
+      const boxWidth = 100;
+      
+      const defPins: PinDefinition[] = (part.pinout && part.pinout.length > 0)
+        ? part.pinout.map((p, idx) => {
+            const isLeft = isDualRow ? idx < half : idx % 2 === 0;
+            const rowIdx = isDualRow ? (isLeft ? idx : idx - half) : Math.floor(idx / 2);
+            const totalRows = isDualRow ? half : Math.ceil(pinCount / 2);
+            const yOffset = (rowIdx - (totalRows - 1) / 2) * rowSpacing;
+            return {
+              id: String(p.pin),
+              name: p.name,
+              number: String(p.pin),
+              x: isLeft ? -boxWidth / 2 : boxWidth / 2,
+              y: Math.round(yOffset),
+              direction: isLeft ? 'left' : 'right',
+              type: (p.type as any) || (p.name.toLowerCase().includes('gnd') ? 'ground' : p.name.toLowerCase().includes('vcc') ? 'power' : 'passive'),
+            };
+          })
+        : [
+            { id: '1', name: '1', x: -40, y: -15, direction: 'left', type: 'passive' },
+            { id: '2', name: '2', x: -40, y: 15, direction: 'left', type: 'passive' },
+            { id: '3', name: '3', x: 40, y: -15, direction: 'right', type: 'passive' },
+            { id: '4', name: '4', x: 40, y: 15, direction: 'right', type: 'passive' },
+          ];
 
-      // Build pins array using exact pinout names from AllDataSheet
-      const initialPins = (part.pinout && part.pinout.length > 0)
-        ? part.pinout.map((p, idx) => ({
-            id: compDef.pins[idx]?.id || `pin_${p.pin}`,
-            name: p.name,
-          }))
-        : compDef.pins.map((p) => ({
-            id: p.id,
-            name: p.name,
-          }));
+      const customDef: ComponentDefinition = {
+        type: customType,
+        name: `${part.partNumber} (${part.manufacturer || 'IC'})`,
+        prefix,
+        category: (catLower.includes('sensor') ? 'sensors' : catLower.includes('transistor') ? 'semiconductors' : 'ics') as any,
+        defaultVal: part.partNumber,
+        defaultFootprint: part.package || 'DIP-8',
+        width: boxWidth,
+        height: boxHeight,
+        pins: defPins,
+        description: part.description,
+        symbol: 'generic_ic',
+      };
+
+      registerCustomComponentDef(customDef);
+
+      const initialPins = defPins.map((p) => ({
+        id: p.id,
+        name: p.name,
+      }));
 
       const resolvedImageUrl = part.imageUrl || getComponentRealImageUrl(part.partNumber, part.category, part.package);
 
       const newComponent: SchematicComponent = {
         id: `comp_ads_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        type: symbolType,
+        type: customType,
         designator: nextDesignator,
         value: part.partNumber,
         footprint: part.package,
@@ -548,10 +651,56 @@ export default function App() {
       setSelectedCompIds([newComponent.id]);
       setSelectedWireIds([]);
       setActiveTool('select');
+
+      // Center viewport onto the placed component
+      setPan({
+        x: Math.round(360 - placeX * zoom),
+        y: Math.round(240 - placeY * zoom),
+      });
+
       setToastMessage(`⚡ Added ${part.partNumber} (${part.manufacturer}) directly to circuit diagram!`);
       setIsAllDataSheetModalOpen(false);
     },
-    [safeDoc, pan, commitDocumentChange]
+    [safeDoc, pan, zoom, commitDocumentChange]
+  );
+
+  // Apply datasheet specs to an existing selected component
+  const handleApplySpecsToComponent = useCallback(
+    (
+      componentId: string,
+      datasheetData: {
+        partNumber: string;
+        manufacturer: string;
+        alldatasheetUrl: string;
+        footprint: string;
+        description: string;
+        specs: Record<string, string>;
+      }
+    ) => {
+      const currentComps = safeDoc.components || [];
+      const updated = currentComps.map((c) => {
+        if (c.id === componentId) {
+          return {
+            ...c,
+            value: datasheetData.partNumber,
+            footprint: datasheetData.footprint || c.footprint,
+            manufacturer: datasheetData.manufacturer,
+            partNumber: datasheetData.partNumber,
+            alldatasheetUrl: datasheetData.alldatasheetUrl,
+            datasheetDescription: datasheetData.description,
+            datasheetSpecs: datasheetData.specs,
+          };
+        }
+        return c;
+      });
+      commitDocumentChange({
+        ...safeDoc,
+        components: updated,
+        updatedAt: new Date().toISOString(),
+      });
+      setToastMessage(`Updated ${datasheetData.partNumber} specs on component!`);
+    },
+    [safeDoc, commitDocumentChange]
   );
 
   // Quick Insert Power & Earthing Reference Rails (+ / - / ⏚ PE)
@@ -1283,7 +1432,36 @@ export default function App() {
           setActiveTool('select');
           setToastMessage(`Selected "${def.name}". Click on schematic canvas to place.`);
         }}
+        onAddComponentDirectlyToCanvas={(def) => {
+          registerCustomComponentDef(def);
+          const currentComps = safeDoc.components || [];
+          const maxX = currentComps.length > 0 ? Math.max(...currentComps.map((c) => c.x)) + 140 : 200;
+          const prefix = def.prefix || 'U';
+          const existingWithPrefix = currentComps.filter((c) => c.designator?.startsWith(prefix)).length;
+          const newComp: SchematicComponent = {
+            id: `comp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            type: def.type,
+            designator: `${prefix}${existingWithPrefix + 1}`,
+            value: def.defaultVal || def.name,
+            footprint: def.defaultFootprint || 'MODULE_STANDARD',
+            x: Math.round(maxX / 10) * 10,
+            y: 220,
+            rotation: 0,
+            pins: def.pins.map((p) => ({ id: p.id, name: p.name })),
+          };
+          const updated = sanitizeDocument({
+            ...safeDoc,
+            components: [...currentComps, newComp],
+            updatedAt: new Date().toISOString(),
+          });
+          commitDocumentChange(updated);
+          setSelectedCompIds([newComp.id]);
+          setSelectedWireIds([]);
+          setToastMessage(`Placed "${def.name}" (${newComp.designator}) directly onto schematic!`);
+        }}
         onAddCircuitToCanvas={handleAddCircuitFromGoogle}
+        onApplyAllDataSheetComponent={handleApplyAllDataSheetComponent}
+        onOpenAllDataSheet={handleOpenAllDataSheetModal}
       />
 
       {/* User Authentication & WhatsApp OTP Modal */}
@@ -1326,6 +1504,9 @@ export default function App() {
         isOpen={isAllDataSheetModalOpen}
         onClose={() => setIsAllDataSheetModalOpen(false)}
         onSelectComponent={handleApplyAllDataSheetComponent}
+        onAddCircuitToCanvas={handleAddCircuitFromGoogle}
+        selectedComponent={selectedComponents[0] || null}
+        onApplySpecsToComponent={handleApplySpecsToComponent}
         initialQuery={allDataSheetSearchQuery}
       />
 

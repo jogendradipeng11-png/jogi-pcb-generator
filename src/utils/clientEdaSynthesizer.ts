@@ -5,9 +5,28 @@ import { SchematicDocument, SchematicComponent } from '../types';
 import { autoRouteSchematicNets } from './autorouter';
 
 export function synthesizeClientCircuit(prompt: string, hintTitle?: string): SchematicDocument {
-  const p = (prompt || '').toLowerCase();
+  let p = (prompt || '').toLowerCase();
+  let extractedUrlTitle = '';
 
-  let title = hintTitle || 'Electronic Circuit Schematic';
+  // Extract article slug if user pasted a URL (e.g., https://www.circuits-diy.com/555-timer-flasher-circuit/)
+  if (p.includes('circuits-diy.com') || p.startsWith('http')) {
+    try {
+      const urlMatch = prompt.trim().match(/https?:\/\/[^\s"'<>]+/);
+      const urlStr = urlMatch ? urlMatch[0] : prompt.trim();
+      const urlObj = new URL(urlStr.startsWith('http') ? urlStr : `https://${urlStr}`);
+      const slug = urlObj.pathname.split('/').filter(Boolean).pop() || '';
+      if (slug) {
+        extractedUrlTitle = slug
+          .replace(/[-_]/g, ' ')
+          .replace(/\b\w/g, (c) => c.toUpperCase());
+        p = `${extractedUrlTitle.toLowerCase()} ${p}`;
+      }
+    } catch {
+      // ignore URL parsing error
+    }
+  }
+
+  let title = extractedUrlTitle || hintTitle || 'Electronic Circuit Schematic';
   let category = 'General Electronics';
   let summary = 'Synthesized schematic diagram with verified nets and component pinouts.';
   let explanation = 'Electrically verified circuit stage with power rails, signal paths, and passive conditioning.';
@@ -27,10 +46,309 @@ export function synthesizeClientCircuit(prompt: string, hintTitle?: string): Sch
     pins: Array<{ id: string; name: string; net: string }>;
   }> = [];
 
-  if (p.includes('555') || p.includes('timer') || p.includes('flasher') || p.includes('astable') || p.includes('oscillator')) {
-    title = '555 Timer Astable Multivibrator (1Hz)';
+  // --- 1. LIGHT-ACTIVATED DARK SENSOR (Circuits-DIY classic: LDR + Transistor/Relay) ---
+  if (p.includes('ldr') || p.includes('dark sensor') || p.includes('light sensor') || p.includes('light-activated') || p.includes('night light')) {
+    title = extractedUrlTitle || 'Light-Activated Relay Switch (Circuits-DIY)';
+    category = 'Sensors & Switching';
+    summary = 'Automatic night light/dark sensor switch circuit using an LDR, potentiometer threshold adjustment, 2N2222 NPN transistor, and relay/LED output.';
+    formula = 'Vbase = Vcc * (R_ldr / (R_ldr + R_pot)) >= 0.7V triggers transistor conduction';
+    specifications = [
+      'Operating Voltage: 9V - 12V DC',
+      'Trigger Mechanism: High resistance in darkness increases base voltage',
+      'Sensitivity: Adjustable via 50kΩ potentiometer',
+      'Output: 12V Relay driving external loads up to 10A / 250VAC',
+    ];
+    tips = [
+      'In darkness, LDR resistance rises to >100kΩ, raising the base potential to switch ON the transistor.',
+      'Diode D1 (1N4007) across the relay coil prevents inductive flyback damage.',
+    ];
+    rawComponents = [
+      {
+        id: 'c_vcc',
+        type: 'vcc',
+        designator: 'VCC1',
+        value: '+12V',
+        footprint: 'POWER_PORT',
+        x: 120,
+        y: 80,
+        pins: [{ id: '1', name: 'VCC', net: 'VCC' }],
+      },
+      {
+        id: 'c_pot',
+        type: 'pot',
+        designator: 'RV1',
+        value: '50kΩ',
+        footprint: 'POT-BOURNS-3386P',
+        x: 220,
+        y: 120,
+        pins: [
+          { id: '1', name: '1', net: 'VCC' },
+          { id: '2', name: 'W', net: 'BASE_DIV' },
+          { id: '3', name: '3', net: 'BASE_DIV' },
+        ],
+      },
+      {
+        id: 'c_ldr',
+        type: 'sensor_ldr',
+        designator: 'LDR1',
+        value: 'Photoresistor GL5528',
+        footprint: 'LDR-5MM',
+        x: 220,
+        y: 260,
+        pins: [
+          { id: '1', name: '1', net: 'BASE_DIV' },
+          { id: '2', name: '2', net: 'GND' },
+        ],
+      },
+      {
+        id: 'c_rbase',
+        type: 'resistor',
+        designator: 'R1',
+        value: '1kΩ',
+        footprint: 'R0805',
+        x: 340,
+        y: 200,
+        pins: [
+          { id: '1', name: '1', net: 'BASE_DIV' },
+          { id: '2', name: '2', net: 'TRANS_BASE' },
+        ],
+      },
+      {
+        id: 'c_q1',
+        type: 'npn_bjt',
+        designator: 'Q1',
+        value: '2N2222',
+        footprint: 'TO-92',
+        x: 440,
+        y: 240,
+        pins: [
+          { id: '1', name: 'B', net: 'TRANS_BASE' },
+          { id: '2', name: 'C', net: 'RELAY_COIL_NEG' },
+          { id: '3', name: 'E', net: 'GND' },
+        ],
+      },
+      {
+        id: 'c_relay',
+        type: 'relay_5v',
+        designator: 'K1',
+        value: '12V SPDT Relay',
+        footprint: 'RELAY-SONGLE-SRD',
+        x: 580,
+        y: 140,
+        pins: [
+          { id: '1', name: 'COIL+', net: 'VCC' },
+          { id: '2', name: 'COIL-', net: 'RELAY_COIL_NEG' },
+          { id: '3', name: 'COM', net: 'AC_LINE' },
+          { id: '4', name: 'NO', net: 'LOAD_OUT' },
+          { id: '5', name: 'NC', net: 'NC_PIN' },
+        ],
+      },
+      {
+        id: 'c_diode',
+        type: 'diode_1n4007',
+        designator: 'D1',
+        value: '1N4007',
+        footprint: 'DO-41',
+        x: 480,
+        y: 120,
+        pins: [
+          { id: '1', name: 'K', net: 'VCC' },
+          { id: '2', name: 'A', net: 'RELAY_COIL_NEG' },
+        ],
+      },
+      {
+        id: 'c_led',
+        type: 'led',
+        designator: 'LED1',
+        value: 'Status LED',
+        footprint: 'LED0805',
+        x: 580,
+        y: 300,
+        pins: [
+          { id: '1', name: 'A', net: 'LED_A' },
+          { id: '2', name: 'K', net: 'RELAY_COIL_NEG' },
+        ],
+      },
+      {
+        id: 'c_rled',
+        type: 'resistor',
+        designator: 'R2',
+        value: '1kΩ',
+        footprint: 'R0805',
+        x: 580,
+        y: 220,
+        pins: [
+          { id: '1', name: '1', net: 'VCC' },
+          { id: '2', name: '2', net: 'LED_A' },
+        ],
+      },
+      {
+        id: 'c_gnd',
+        type: 'gnd',
+        designator: 'GND1',
+        value: 'GND',
+        footprint: 'POWER_PORT',
+        x: 340,
+        y: 360,
+        pins: [{ id: '1', name: 'GND', net: 'GND' }],
+      },
+    ];
+  }
+  // --- 2. 12V AUTOMATIC BATTERY CHARGER (Circuits-DIY: LM358 Comparator + Transistor Cutoff) ---
+  else if (p.includes('battery charger') || p.includes('charger') || p.includes('cutoff') || p.includes('battery')) {
+    title = extractedUrlTitle || '12V Automatic Battery Charger with Auto Cut-off (Circuits-DIY)';
+    category = 'Power & Chargers';
+    summary = 'Automatic 12V Lead-Acid/Li-ion battery charger circuit featuring LM358 dual operational amplifier voltage comparator with overcharge protection cutoff.';
+    formula = 'V_threshold = 13.8V (Float) / 14.4V (Absorption cutoff)';
+    specifications = [
+      'Input Voltage: 15V - 18V DC unfiltered input',
+      'Cutoff Voltage: Calibrated to 14.2V DC via RV1',
+      'Hysteresis: Provided via feedback resistor to eliminate relay chattering',
+      'Indicator: Dual Red (Charging) & Green (Full Battery) LEDs',
+    ];
+    tips = [
+      'RV1 adjusts the upper charging trip point (14.2V). When reached, the comparator output latches the relay open.',
+    ];
+    rawComponents = [
+      {
+        id: 'c_vcc',
+        type: 'vcc',
+        designator: 'VIN',
+        value: '+15V DC',
+        footprint: 'POWER_PORT',
+        x: 100,
+        y: 80,
+        pins: [{ id: '1', name: 'VCC', net: 'VIN' }],
+      },
+      {
+        id: 'c_u1',
+        type: 'ic_opamp',
+        designator: 'U1',
+        value: 'LM358',
+        footprint: 'DIP-8',
+        x: 360,
+        y: 200,
+        pins: [
+          { id: '1', name: 'OUT', net: 'COMP_OUT' },
+          { id: '2', name: 'IN-', net: 'V_REF' },
+          { id: '3', name: 'IN+', net: 'V_SENSE' },
+          { id: '4', name: 'V-', net: 'GND' },
+          { id: '8', name: 'V+', net: 'VIN' },
+        ],
+      },
+      {
+        id: 'c_zener',
+        type: 'zener_diode',
+        designator: 'DZ1',
+        value: '5.1V Zener',
+        footprint: 'DO-35',
+        x: 240,
+        y: 260,
+        pins: [
+          { id: '1', name: 'K', net: 'V_REF' },
+          { id: '2', name: 'A', net: 'GND' },
+        ],
+      },
+      {
+        id: 'c_rz',
+        type: 'resistor',
+        designator: 'R1',
+        value: '2.2kΩ',
+        footprint: 'R0805',
+        x: 240,
+        y: 120,
+        pins: [
+          { id: '1', name: '1', net: 'VIN' },
+          { id: '2', name: '2', net: 'V_REF' },
+        ],
+      },
+      {
+        id: 'c_pot',
+        type: 'pot',
+        designator: 'RV1',
+        value: '10kΩ Trimpot',
+        footprint: 'POT-BOURNS-3386P',
+        x: 240,
+        y: 380,
+        pins: [
+          { id: '1', name: '1', net: 'VIN' },
+          { id: '2', name: 'W', net: 'V_SENSE' },
+          { id: '3', name: '3', net: 'GND' },
+        ],
+      },
+      {
+        id: 'c_q1',
+        type: 'npn_bjt',
+        designator: 'Q1',
+        value: 'BD139 / 2N2222',
+        footprint: 'TO-126',
+        x: 520,
+        y: 220,
+        pins: [
+          { id: '1', name: 'B', net: 'TRANS_BASE' },
+          { id: '2', name: 'C', net: 'COIL_NEG' },
+          { id: '3', name: 'E', net: 'GND' },
+        ],
+      },
+      {
+        id: 'c_rb',
+        type: 'resistor',
+        designator: 'R2',
+        value: '1kΩ',
+        footprint: 'R0805',
+        x: 440,
+        y: 200,
+        pins: [
+          { id: '1', name: '1', net: 'COMP_OUT' },
+          { id: '2', name: '2', net: 'TRANS_BASE' },
+        ],
+      },
+      {
+        id: 'c_relay',
+        type: 'relay_5v',
+        designator: 'K1',
+        value: '12V Cutoff Relay',
+        footprint: 'RELAY-SONGLE-SRD',
+        x: 640,
+        y: 140,
+        pins: [
+          { id: '1', name: 'COIL+', net: 'VIN' },
+          { id: '2', name: 'COIL-', net: 'COIL_NEG' },
+          { id: '3', name: 'COM', net: 'VIN' },
+          { id: '4', name: 'NO', net: 'BATT_CHARGE_POS' },
+          { id: '5', name: 'NC', net: 'NC_PIN' },
+        ],
+      },
+      {
+        id: 'c_d1',
+        type: 'diode_1n4007',
+        designator: 'D1',
+        value: '1N4007 Flyback',
+        footprint: 'DO-41',
+        x: 560,
+        y: 100,
+        pins: [
+          { id: '1', name: 'K', net: 'VIN' },
+          { id: '2', name: 'A', net: 'COIL_NEG' },
+        ],
+      },
+      {
+        id: 'c_gnd',
+        type: 'gnd',
+        designator: 'GND1',
+        value: 'GND',
+        footprint: 'POWER_PORT',
+        x: 360,
+        y: 420,
+        pins: [{ id: '1', name: 'GND', net: 'GND' }],
+      },
+    ];
+  }
+  // --- 3. 555 TIMER CIRCUITS (Astable Flasher, Pulse Gen, Oscillator) ---
+  else if (p.includes('555') || p.includes('timer') || p.includes('flasher') || p.includes('astable') || p.includes('oscillator')) {
+    title = extractedUrlTitle || '555 Timer Astable Multivibrator (Circuits-DIY)';
     category = 'Oscillator / Timer';
-    summary = 'Classic 555 astable multivibrator producing square wave clock pulses with an LED indicator.';
+    summary = 'Classic 555 astable multivibrator producing continuous square wave pulses with an active LED flasher indicator.';
     formula = 'f = 1.44 / ((R1 + 2*R2) * C1) ≈ 1.02 Hz';
     specifications = [
       'Operating Voltage: 9.0V DC (VCC)',

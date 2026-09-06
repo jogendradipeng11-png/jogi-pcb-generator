@@ -41,6 +41,7 @@ import {
   Keyboard,
   HelpCircle,
   Github,
+  ClipboardPaste,
 } from 'lucide-react';
 import { EditorTool, CanvasViewMode, SchematicDocument, UserProfile, SimulationState, SchematicComponent, Wire, SimulationScenario, OperatingConditions } from '../../types';
 import { STARTER_CIRCUITS } from '../../data/examples';
@@ -58,6 +59,7 @@ interface HeaderProps {
   onOpenPrintPdf?: () => void;
   onOpenUniversalModal?: () => void;
   onOpenGoogleModal?: () => void;
+  onPasteFromClipboard?: () => void;
   onExportGerber?: () => void;
   onAutoRoute?: () => void;
   onAnnotate?: () => void;
@@ -107,6 +109,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenPrintPdf,
   onOpenUniversalModal,
   onOpenGoogleModal,
+  onPasteFromClipboard,
   onOpenAllDataSheetModal,
   onInsertPowerReferences,
   onExportGerber,
@@ -332,6 +335,18 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Globe className="w-3.5 h-3.5 text-sky-400" />
               <span>Google Parts</span>
+            </button>
+          )}
+
+          {/* Paste Copied Web Circuit or Image Button */}
+          {onPasteFromClipboard && (
+            <button
+              onClick={onPasteFromClipboard}
+              className="px-2.5 py-1.5 bg-gradient-to-r from-amber-600/30 to-orange-600/30 hover:from-amber-600/50 hover:to-orange-600/50 text-amber-300 rounded-lg text-xs font-semibold border border-amber-500/40 hover:border-amber-400 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              title="Auto-generate circuit on schematic from copied Google image, URL, or link address (Ctrl+V)"
+            >
+              <ClipboardPaste className="w-3.5 h-3.5 text-amber-400" />
+              <span>Paste Web Circuit</span>
             </button>
           )}
 

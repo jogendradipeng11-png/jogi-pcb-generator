@@ -46,6 +46,11 @@ import { autoRouteSchematicNets } from './utils/autorouter';
 import { reannotateComponents } from './utils/annotation';
 import { rotateCircuit } from './utils/circuitTransform';
 import { getComponentRealImageUrl } from './utils/componentImages';
+import {
+  importCircuitFromImageDataUrl,
+  importCircuitFromUrlOrText,
+  readClipboardCircuitData,
+} from './utils/circuitClipboardImporter';
 import { Sparkles, HelpCircle, Layers, Cpu, Activity, CheckCircle2 } from 'lucide-react';
 
 // Ensure all component and wire IDs are strictly unique and document is guaranteed valid
@@ -886,6 +891,115 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleUndo, handleRedo, viewMode]);
 
+  // Read Clipboard and Auto-Generate circuit onto Schematic Editor
+  const handlePasteFromClipboard = useCallback(async () => {
+    setToastMessage('Reading clipboard for copied circuit diagram image or web link...');
+    try {
+      const clip = await readClipboardCircuitData();
+      if (!clip) {
+        setIsGoogleModalOpen(true);
+        setToastMessage('Press Ctrl+V to paste your copied circuit image or web link directly!');
+        return;
+      }
+
+      if (clip.type === 'image') {
+        setToastMessage('🔍 Translating copied circuit image into schematic components & nets...');
+        const res = await importCircuitFromImageDataUrl(clip.data);
+        if (res.components && res.components.length > 0) {
+          setViewMode('schematic');
+          handleAddCircuitFromGoogle(res.components, res.wires);
+          setToastMessage(`⚡ Auto-generated circuit "${res.title}" from copied image onto schematic editor!`);
+        }
+      } else if (clip.type === 'text') {
+        setToastMessage(`⚡ Auto-generating schematic from copied link: "${clip.data.slice(0, 40)}..."`);
+        const res = await importCircuitFromUrlOrText(clip.data);
+        if (res.components && res.components.length > 0) {
+          setViewMode('schematic');
+          handleAddCircuitFromGoogle(res.components, res.wires);
+          setToastMessage(`⚡ Auto-generated circuit "${res.title}" from copied link onto schematic editor!`);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to paste from clipboard:', err);
+      setToastMessage('Could not parse circuit from clipboard. Try pasting a link or search term.');
+    }
+  }, [handleAddCircuitFromGoogle]);
+
+  // Global listener for Ctrl+V / paste (Copy Image, Copy URL, Copy Link Address from Google / Web)
+  useEffect(() => {
+    const handleGlobalPaste = async (e: ClipboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+
+      // Check for image in clipboard
+      const items = e.clipboardData?.items;
+      let imageFile: File | null = null;
+      if (items) {
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type.startsWith('image/')) {
+            imageFile = items[i].getAsFile();
+            break;
+          }
+        }
+      }
+
+      if (imageFile) {
+        e.preventDefault();
+        setToastMessage('🔍 Processing copied circuit diagram image... Synthesizing schematic...');
+        try {
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(imageFile!);
+          });
+
+          const res = await importCircuitFromImageDataUrl(dataUrl);
+          if (res.components && res.components.length > 0) {
+            setViewMode('schematic');
+            handleAddCircuitFromGoogle(res.components, res.wires);
+            setToastMessage(`⚡ Auto-generated circuit "${res.title}" from copied image onto schematic editor! Check and edit below.`);
+          }
+        } catch (err) {
+          console.error('Error importing circuit from image:', err);
+          setToastMessage('Failed to import copied image.');
+        }
+        return;
+      }
+
+      // Check for text or link in clipboard
+      const pastedText = e.clipboardData?.getData('text');
+      if (pastedText && pastedText.trim()) {
+        const trimmed = pastedText.trim();
+        const isUrl = trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('www.');
+        const isCircuitKeyword = /circuit|schematic|555|timer|charger|relay|sensor|ldr|regulator|amplifier|transistor|inverter|arduino|esp32|diy/i.test(trimmed);
+
+        if (isUrl || isCircuitKeyword) {
+          e.preventDefault();
+          setToastMessage(`⚡ Auto-generating schematic from copied web link: ${trimmed.slice(0, 45)}...`);
+          try {
+            const res = await importCircuitFromUrlOrText(trimmed);
+            if (res.components && res.components.length > 0) {
+              setViewMode('schematic');
+              handleAddCircuitFromGoogle(res.components, res.wires);
+              setToastMessage(`⚡ Auto-generated circuit "${res.title}" from copied web link onto schematic editor! Check and edit below.`);
+            }
+          } catch (err) {
+            console.error('Error importing circuit from link:', err);
+            setToastMessage('Failed to auto-generate circuit from link.');
+          }
+        }
+      }
+    };
+
+    window.addEventListener('paste', handleGlobalPaste);
+    return () => window.removeEventListener('paste', handleGlobalPaste);
+  }, [handleAddCircuitFromGoogle]);
+
   // Update Circuit callback (both components and wires atomically)
   const handleUpdateCircuit = useCallback((newComps: SchematicComponent[], newWires: Wire[]) => {
     commitDocumentChange({
@@ -1146,6 +1260,7 @@ export default function App() {
         onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
         onOpenAllDataSheetModal={() => handleOpenAllDataSheetModal()}
         onInsertPowerReferences={handleInsertPowerReferences}
+        onPasteFromClipboard={handlePasteFromClipboard}
         onOpenGitHubModal={() => setIsGitHubModalOpen(true)}
       />
 
@@ -1191,6 +1306,7 @@ export default function App() {
               onToolChange={setActiveTool}
               onOpenFullScope={() => setIsScopeOpen(true)}
               onUpdateComponentSettings={handleUpdateComponentSettings}
+              onPasteFromClipboard={handlePasteFromClipboard}
             />
           ) : viewMode === 'pcb' ? (
             <PcbCanvas

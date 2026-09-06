@@ -33,6 +33,7 @@ import {
   Settings2,
   AlertCircle,
   Magnet,
+  ClipboardPaste,
 } from 'lucide-react';
 import {
   snapToGrid,
@@ -77,6 +78,7 @@ interface SchematicCanvasProps {
   onOpenFullScope?: () => void;
   onUpdateComponentSettings?: (compId: string, settings: Partial<ComponentTestSettings>) => void;
   onToolChange?: (tool: EditorTool) => void;
+  onPasteFromClipboard?: () => void;
 }
 
 export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
@@ -103,6 +105,7 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
   onOpenFullScope,
   onUpdateComponentSettings,
   onToolChange,
+  onPasteFromClipboard,
 }) => {
   const svgRef = useRef<SVGSVGElement | null>(null);
 
@@ -2506,6 +2509,20 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
           <Radio className="w-3 h-3 text-sky-400" />
           <span>{activeProbe ? `Probe: ${activeProbe.label.slice(0, 12)}…` : 'Click to Probe [P]'}</span>
         </button>
+
+        {onPasteFromClipboard && (
+          <>
+            <div className="h-3 w-px bg-slate-700" />
+            <button
+              onClick={onPasteFromClipboard}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-sans font-medium bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-pointer transition-colors"
+              title="Paste copied circuit diagram or web link (Ctrl+V) to auto-generate schematic"
+            >
+              <ClipboardPaste className="w-3 h-3 text-amber-400" />
+              <span>Paste Web Circuit [Ctrl+V]</span>
+            </button>
+          </>
+        )}
       </div>
 
       {/* Real-time Magnetic Snap Status Pill during Drag or Library Placement */}

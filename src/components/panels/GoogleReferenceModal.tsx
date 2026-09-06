@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ComponentDefinition, PinDefinition, SchematicComponent, Wire, GoogleSearchResultItem } from '../../types';
 import { COMPONENT_CATALOG, registerCustomComponentDef } from '../../data/components';
 import { synthesizeClientCircuit } from '../../utils/clientEdaSynthesizer';
@@ -31,7 +31,15 @@ import {
   ChevronDown,
   ChevronUp,
   Package,
+  Copy,
+  Image as ImageIcon,
+  ClipboardPaste,
 } from 'lucide-react';
+import {
+  importCircuitFromImageDataUrl,
+  importCircuitFromUrlOrText,
+  readClipboardCircuitData,
+} from '../../utils/circuitClipboardImporter';
 
 interface GoogleReferenceModalProps {
   isOpen: boolean;
@@ -141,8 +149,6 @@ export const GoogleReferenceModal: React.FC<GoogleReferenceModalProps> = ({
       handlePerformGoogleSearch(initialSearchQuery);
     }
   }, [isOpen, initialSearchQuery]);
-
-  if (!isOpen) return null;
 
   // Handle Direct Google Search
   const handlePerformGoogleSearch = async (queryToUse?: string) => {
@@ -502,6 +508,134 @@ export const GoogleReferenceModal: React.FC<GoogleReferenceModalProps> = ({
     setSavedItemIds((prev) => new Set(prev).add(item.id));
   };
 
+  // 3. Copy Link Address / URL handler
+  const handleCopyLink = async (item: GoogleSearchResultItem) => {
+    const urlToCopy =
+      item.url ||
+      item.datasheetUrl ||
+      item.googleSearchUrl ||
+      `https://www.google.com/search?q=${encodeURIComponent(item.title + ' electronic circuit schematic')}`;
+    try {
+      await navigator.clipboard.writeText(urlToCopy);
+      showToast(`📋 Copied Link Address to clipboard! Generating circuit on schematic...`);
+      handleAddResultToCircuit(item);
+    } catch {
+      showToast(`Copied Link: ${urlToCopy.slice(0, 40)}... Generating on schematic...`);
+      handleAddResultToCircuit(item);
+    }
+  };
+
+  // 4. Copy Image / Diagram handler
+  const handleCopyImage = async (item: GoogleSearchResultItem) => {
+    const imgUrl =
+      item.imageUrl ||
+      `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(item.title + ' schematic diagram')}`;
+    try {
+      await navigator.clipboard.writeText(imgUrl);
+      showToast(`🖼️ Copied Circuit Image to clipboard! Generating circuit on schematic...`);
+      handleAddResultToCircuit(item);
+    } catch {
+      showToast(`Copied image link to clipboard! Generating on schematic...`);
+      handleAddResultToCircuit(item);
+    }
+  };
+
+  // 5. Read Clipboard and Auto-Generate on Schematic Canvas
+  const handlePasteAndGenerate = async () => {
+    showToast('Reading clipboard for copied circuit link or image...');
+    try {
+      const clip = await readClipboardCircuitData();
+      if (!clip) {
+        showToast('Clipboard empty or permissions needed. You can also paste using Ctrl+V!');
+        return;
+      }
+
+      if (clip.type === 'image') {
+        showToast('🔍 Analyzing copied circuit image and generating schematic...');
+        const res = await importCircuitFromImageDataUrl(clip.data);
+        if (res.components && res.components.length > 0) {
+          if (onAddCircuitToCanvas) {
+            onAddCircuitToCanvas(res.components, res.wires);
+          }
+          showToast(`⚡ Auto-generated circuit "${res.title}" from copied image directly onto schematic!`);
+          onClose();
+        }
+      } else if (clip.type === 'text') {
+        showToast(`⚡ Auto-generating schematic from copied link/query: "${clip.data.slice(0, 35)}..."`);
+        const res = await importCircuitFromUrlOrText(clip.data);
+        if (res.components && res.components.length > 0) {
+          if (onAddCircuitToCanvas) {
+            onAddCircuitToCanvas(res.components, res.wires);
+          }
+          showToast(`⚡ Auto-generated circuit "${res.title}" from copied link directly onto schematic!`);
+          onClose();
+        }
+      }
+    } catch (err) {
+      console.error('Paste and generate error:', err);
+      showToast('Could not parse circuit from clipboard. Try pasting a link or search term.');
+    }
+  };
+
+  // 6. Listen for Paste Events while modal is open
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleModalPaste = async (e: ClipboardEvent) => {
+      const isSearchInput = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+
+      // Check for image
+      const items = e.clipboardData?.items;
+      let imageFile: File | null = null;
+      if (items) {
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type.startsWith('image/')) {
+            imageFile = items[i].getAsFile();
+            break;
+          }
+        }
+      }
+
+      if (imageFile) {
+        e.preventDefault();
+        showToast('🔍 Detected copied circuit image! Translating into schematic editor...');
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const dataUrl = reader.result as string;
+          const res = await importCircuitFromImageDataUrl(dataUrl);
+          if (res.components && res.components.length > 0 && onAddCircuitToCanvas) {
+            onAddCircuitToCanvas(res.components, res.wires);
+            showToast(`⚡ Auto-generated "${res.title}" from copied image directly onto schematic!`);
+            onClose();
+          }
+        };
+        reader.readAsDataURL(imageFile);
+        return;
+      }
+
+      // Check for link or circuit text when not editing an input
+      if (!isSearchInput) {
+        const text = e.clipboardData?.getData('text');
+        if (text && text.trim()) {
+          const trimmed = text.trim();
+          if (trimmed.startsWith('http') || /circuit|schematic|555|timer|charger|relay|diy/i.test(trimmed)) {
+            e.preventDefault();
+            showToast(`⚡ Auto-generating schematic from copied link: ${trimmed.slice(0, 35)}...`);
+            const res = await importCircuitFromUrlOrText(trimmed);
+            if (res.components && res.components.length > 0 && onAddCircuitToCanvas) {
+              onAddCircuitToCanvas(res.components, res.wires);
+              showToast(`⚡ Auto-generated "${res.title}" from copied link directly onto schematic!`);
+              onClose();
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener('paste', handleModalPaste);
+    return () => window.removeEventListener('paste', handleModalPaste);
+  }, [isOpen, onAddCircuitToCanvas, onClose]);
+
   // Custom Generator submit
   const handleGenerateCustomPart = () => {
     const name = customPartName.trim() || 'Custom Module';
@@ -573,6 +707,8 @@ export const GoogleReferenceModal: React.FC<GoogleReferenceModalProps> = ({
 
   const savedComponents = getUserSavedComponents();
   const savedCircuits = getUserSavedCircuits();
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-y-auto">
@@ -789,6 +925,36 @@ export const GoogleReferenceModal: React.FC<GoogleReferenceModalProps> = ({
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Interactive Copied Web Circuit / Image Auto-Detector */}
+            <div className="p-3 bg-gradient-to-r from-amber-950/40 via-slate-900/90 to-sky-950/40 border border-amber-500/30 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-md">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0">
+                  <ClipboardPaste className="w-4 h-4 text-amber-400" />
+                </div>
+                <div>
+                  <div className="font-semibold text-slate-100 flex items-center gap-2">
+                    <span>Copied a circuit diagram or link on Google / Web?</span>
+                    <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[10px] font-mono">
+                      Ctrl + V
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Right-click any circuit on Google Web, click <strong className="text-slate-200">"Copy Image"</strong>, <strong className="text-slate-200">"Copy URL"</strong>, or <strong className="text-slate-200">"Copy Link Address"</strong>, and it will automatically generate directly onto the schematic editor!
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handlePasteAndGenerate}
+                className="px-3.5 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-lg font-bold text-xs shrink-0 flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+                title="Read clipboard for copied image, URL, or link and auto-generate onto schematic"
+              >
+                <ClipboardPaste className="w-3.5 h-3.5" />
+                <span>⚡ Paste &amp; Auto-Generate</span>
+              </button>
             </div>
 
             {/* Search Results Area */}
@@ -1053,6 +1219,28 @@ export const GoogleReferenceModal: React.FC<GoogleReferenceModalProps> = ({
                                 <span>Save</span>
                               </>
                             )}
+                          </button>
+
+                          {/* Copy Link Address & Auto-Generate */}
+                          <button
+                            type="button"
+                            onClick={() => handleCopyLink(item)}
+                            className="px-2.5 py-2 bg-slate-900 hover:bg-slate-850 text-sky-300 hover:text-white border border-slate-700/80 hover:border-sky-500 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                            title="Copy link / URL address to clipboard and auto-generate onto schematic"
+                          >
+                            <Copy className="w-3.5 h-3.5 text-sky-400" />
+                            <span>Copy Link</span>
+                          </button>
+
+                          {/* Copy Image & Auto-Generate */}
+                          <button
+                            type="button"
+                            onClick={() => handleCopyImage(item)}
+                            className="px-2.5 py-2 bg-slate-900 hover:bg-slate-850 text-amber-300 hover:text-white border border-slate-700/80 hover:border-amber-500 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                            title="Copy diagram image to clipboard and auto-generate onto schematic"
+                          >
+                            <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Copy Image</span>
                           </button>
                         </div>
                       </div>

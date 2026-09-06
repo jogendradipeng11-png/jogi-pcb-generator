@@ -304,6 +304,8 @@ export interface GoogleSearchResultItem {
   description: string;
   manufacturer?: string;
   partNumber?: string;
+  url?: string;
+  imageUrl?: string;
   datasheetUrl?: string;
   googleSearchUrl?: string;
   supplyVoltage?: string;

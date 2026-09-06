@@ -7,6 +7,7 @@ import {
   ComponentCategory,
   ComponentDefinition,
 } from '../../types';
+import { RealProductImage } from '../../utils/componentImages';
 import {
   Search,
   Zap,
@@ -16,19 +17,25 @@ import {
   ToggleLeft,
   Sliders,
   Maximize2,
+  FileText,
 } from 'lucide-react';
 
 interface ComponentLibraryPanelProps {
   onSelectComponentToPlace: (def: ComponentDefinition) => void;
   selectedDef: ComponentDefinition | null;
+  onOpenGoogleRefModal?: () => void;
+  onOpenAllDataSheetModal?: () => void;
 }
 
 const CATEGORIES: { id: ComponentCategory | 'all'; label: string; icon: any }[] = [
   { id: 'all', label: 'All', icon: Layers },
+  { id: 'modules', label: 'MCUs & Dev', icon: Cpu },
+  { id: 'sensors', label: 'Sensors', icon: Radio },
   { id: 'power', label: 'Power/GND', icon: Zap },
   { id: 'passive', label: 'Passives', icon: Sliders },
   { id: 'semiconductors', label: 'Discrete', icon: Radio },
-  { id: 'ics', label: 'ICs & MCUs', icon: Cpu },
+  { id: 'ics', label: 'ICs', icon: Cpu },
+  { id: 'electromechanical', label: 'Motors/Relays', icon: Maximize2 },
   { id: 'switches', label: 'Switches', icon: ToggleLeft },
   { id: 'connectors', label: 'Connectors', icon: Maximize2 },
 ];
@@ -36,6 +43,8 @@ const CATEGORIES: { id: ComponentCategory | 'all'; label: string; icon: any }[] 
 export const ComponentLibraryPanel: React.FC<ComponentLibraryPanelProps> = ({
   onSelectComponentToPlace,
   selectedDef,
+  onOpenGoogleRefModal,
+  onOpenAllDataSheetModal,
 }) => {
   const [activeCategory, setActiveCategory] = useState<ComponentCategory | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -64,13 +73,37 @@ export const ComponentLibraryPanel: React.FC<ComponentLibraryPanelProps> = ({
           </span>
         </div>
 
+        {/* Quick Access to AllDataSheet and Google Reference */}
+        <div className="grid grid-cols-1 gap-1.5">
+          {onOpenAllDataSheetModal && (
+            <button
+              onClick={onOpenAllDataSheetModal}
+              className="w-full py-1.5 px-2 bg-gradient-to-r from-blue-700 via-sky-600 to-indigo-600 hover:from-blue-600 hover:to-indigo-500 text-white rounded-md text-[11px] font-semibold flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer border border-sky-400/40"
+              title="Search official manufacturer datasheets, pinouts and photos from AllDataSheet.com"
+            >
+              <FileText className="w-3.5 h-3.5 text-sky-200" />
+              <span>AllDataSheet.com Search</span>
+            </button>
+          )}
+
+          {onOpenGoogleRefModal && (
+            <button
+              onClick={onOpenGoogleRefModal}
+              className="w-full py-1 px-2 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-md text-[10px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-slate-700"
+            >
+              <span className="text-amber-300">✨</span>
+              <span>Add from Web Reference</span>
+            </button>
+          )}
+        </div>
+
         <div className="relative">
           <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search R, C, 555, LM358, MCU..."
+            placeholder="Search Arduino, ESP32, 555..."
             className="w-full pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-md text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono transition-colors"
           />
         </div>
@@ -98,36 +131,123 @@ export const ComponentLibraryPanel: React.FC<ComponentLibraryPanelProps> = ({
         })}
       </div>
 
-      {/* Components List */}
+      {/* Quick Power, Source (+ / -), and Earthing Reference Bar */}
+      <div className="p-2 border-b border-slate-800 bg-slate-950/70">
+        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+          <span className="flex items-center gap-1 text-sky-300">
+            <Zap className="w-3 h-3 text-amber-400" />
+            Circuit References
+          </span>
+          <span className="text-[9px] text-slate-500 font-mono">1-Click Place</span>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            onClick={() => onSelectComponentToPlace(getComponentDef('dc_source'))}
+            className="p-1.5 rounded bg-slate-900 hover:bg-slate-850 border border-sky-600/40 hover:border-sky-400 text-left transition-all cursor-pointer group"
+            title="Place DC Voltage Source with + terminal and - terminal"
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-slate-800 border border-sky-400 flex items-center justify-center text-[10px] font-bold text-sky-300 shrink-0">
+                ±
+              </span>
+              <div className="min-w-0">
+                <div className="text-[10px] font-bold text-slate-200 truncate group-hover:text-sky-300">DC Source</div>
+                <div className="text-[9px] text-sky-400 font-mono">+ / - 12V</div>
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => onSelectComponentToPlace(getComponentDef('source_pos_point'))}
+            className="p-1.5 rounded bg-slate-900 hover:bg-slate-850 border border-red-500/40 hover:border-red-400 text-left transition-all cursor-pointer group"
+            title="Place + Source Voltage Point (+V Reference)"
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-red-600 flex items-center justify-center text-[11px] font-bold text-white shrink-0 shadow-xs">
+                +
+              </span>
+              <div className="min-w-0">
+                <div className="text-[10px] font-bold text-slate-200 truncate group-hover:text-red-300">+ Point</div>
+                <div className="text-[9px] text-red-400 font-mono">+V Rail</div>
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => onSelectComponentToPlace(getComponentDef('source_neg_point'))}
+            className="p-1.5 rounded bg-slate-900 hover:bg-slate-850 border border-sky-500/40 hover:border-sky-400 text-left transition-all cursor-pointer group"
+            title="Place - Negative Point (-Ve / 0V Return Reference)"
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-sky-600 flex items-center justify-center text-[11px] font-bold text-white shrink-0 shadow-xs">
+                -
+              </span>
+              <div className="min-w-0">
+                <div className="text-[10px] font-bold text-slate-200 truncate group-hover:text-sky-300">-ve Point</div>
+                <div className="text-[9px] text-sky-400 font-mono">0V Return</div>
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => onSelectComponentToPlace(getComponentDef('earth_ground'))}
+            className="p-1.5 rounded bg-slate-900 hover:bg-slate-850 border border-emerald-500/40 hover:border-emerald-400 text-left transition-all cursor-pointer group"
+            title="Place Protective Earthing Point (⏚ PE)"
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-emerald-600 flex items-center justify-center text-[10px] font-bold text-white shrink-0 shadow-xs">
+                ⏚
+              </span>
+              <div className="min-w-0">
+                <div className="text-[10px] font-bold text-slate-200 truncate group-hover:text-emerald-300">Earthing</div>
+                <div className="text-[9px] text-emerald-400 font-mono">PE Ground</div>
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Components List with Real Product Photography */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-        {filteredComponents.map((comp) => {
+        {filteredComponents.map((comp, idx) => {
           const isSelected = selectedDef?.type === comp.type;
           return (
             <div
-              key={comp.type}
+              key={`${comp.type}_${idx}`}
               onClick={() => onSelectComponentToPlace(comp)}
-              className={`p-2.5 rounded-lg border transition-all cursor-pointer group ${
+              className={`p-2 rounded-lg border transition-all cursor-pointer group ${
                 isSelected
                   ? 'bg-sky-950/70 border-sky-500 shadow-sm'
                   : 'bg-slate-800/40 border-slate-800 hover:border-slate-700 hover:bg-slate-800/80'
               }`}
             >
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="text-xs font-semibold text-slate-200 group-hover:text-sky-300 transition-colors">
-                    {comp.name}
+              <div className="flex items-center gap-2.5">
+                {/* Real Product Image Preview Thumbnail */}
+                <RealProductImage
+                  partNumberOrType={comp.defaultVal || comp.type}
+                  category={comp.category}
+                  footprint={comp.defaultFootprint}
+                  customUrl={comp.imageUrl}
+                  className="w-10 h-10 rounded-md border border-slate-700 shadow-xs shrink-0"
+                />
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-1">
+                    <div className="text-xs font-semibold text-slate-200 group-hover:text-sky-300 transition-colors truncate">
+                      {comp.name}
+                    </div>
+                    <span className="text-[9px] font-mono px-1 py-0.2 bg-slate-900 text-slate-400 rounded border border-slate-800 shrink-0">
+                      {comp.prefix}
+                    </span>
                   </div>
-                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                    Def: <span className="text-sky-400">{comp.defaultVal}</span> • {comp.defaultFootprint}
+                  <div className="text-[10px] text-slate-400 font-mono truncate">
+                    <span className="text-sky-400">{comp.defaultVal}</span> • {comp.defaultFootprint}
                   </div>
+                  <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                    {comp.description}
+                  </p>
                 </div>
-                <span className="text-[10px] font-mono px-1.5 py-0.5 bg-slate-900 text-slate-400 rounded border border-slate-800">
-                  {comp.prefix}
-                </span>
               </div>
-              <p className="text-[10px] text-slate-500 mt-1 line-clamp-1">
-                {comp.description}
-              </p>
             </div>
           );
         })}

@@ -5,12 +5,18 @@ import {
   SchematicDocument,
   ComponentSimResult,
   ComponentTestSettings,
+  CircuitRotationDirection,
 } from '../../types';
 import { getComponentDef } from '../../data/components';
 import { ProductSelectorModal } from './ProductSelectorModal';
+import { getAllDataSheetSearchUrl } from '../../data/allDataSheetCatalog';
+import { RealProductImage } from '../../utils/componentImages';
 import {
   Sliders,
   RotateCw,
+  RotateCcw,
+  FlipHorizontal,
+  FlipVertical,
   Trash2,
   Tag,
   Hash,
@@ -26,30 +32,44 @@ import {
   ToggleRight,
   Gauge,
   ShoppingBag,
+  FileText,
+  ExternalLink,
+  Search,
+  Globe,
 } from 'lucide-react';
 import { formatVoltage, formatCurrent, formatPower, parseUnitValue } from '../../utils/simulation';
 
 interface PropertiesPanelProps {
-  selectedComponents: SchematicComponent[];
-  selectedWires: Wire[];
-  document: SchematicDocument;
+  selectedComponents?: SchematicComponent[];
+  selectedWires?: Wire[];
+  document?: SchematicDocument;
   onUpdateComponent: (updated: SchematicComponent) => void;
   onDeleteSelected: () => void;
   onUpdateDocumentMeta: (meta: Partial<SchematicDocument>) => void;
   simulationResult?: ComponentSimResult;
   isSimulating?: boolean;
+  onOpenAllDataSheetModal?: (initialQuery?: string) => void;
+  onRotateCircuit?: (direction: CircuitRotationDirection) => void;
 }
 
 export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
-  selectedComponents,
-  selectedWires,
+  selectedComponents = [],
+  selectedWires = [],
   document,
   onUpdateComponent,
   onDeleteSelected,
   onUpdateDocumentMeta,
   simulationResult,
   isSimulating = false,
+  onOpenAllDataSheetModal,
+  onRotateCircuit,
 }) => {
+  const safeDoc = document || {
+    title: 'Circuit Schematic',
+    summary: '',
+    components: [],
+    wires: [],
+  };
   const [isProductSelectorOpen, setIsProductSelectorOpen] = useState(false);
   const selectedComp = selectedComponents.length === 1 ? selectedComponents[0] : null;
   const selectedWire = selectedWires.length === 1 ? selectedWires[0] : null;
@@ -99,13 +119,136 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 <Cpu className="w-4 h-4 text-sky-400" />
                 {selectedComp.designator}
               </div>
-              <button
-                onClick={handleRotate}
-                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 flex items-center gap-1 font-mono text-[11px]"
-              >
-                <RotateCw className="w-3 h-3" />
-                {selectedComp.rotation}°
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={onDeleteSelected}
+                  className="px-2 py-1 bg-red-950/60 hover:bg-red-900 border border-red-800/80 text-red-300 rounded flex items-center gap-1 font-mono text-[11px]"
+                  title="Delete Component (Del)"
+                >
+                  <Trash2 className="w-3 h-3 text-red-400" />
+                  Delete
+                </button>
+              </div>
+            </div>
+
+            {/* Real Physical Product Photo & Hardware Information */}
+            <div className="p-3 bg-slate-950/90 rounded-xl border border-slate-800 shadow-md space-y-2">
+              <div className="flex items-center gap-3">
+                <RealProductImage
+                  partNumberOrType={selectedComp.partNumber || selectedComp.value || selectedComp.type}
+                  category={selectedComp.realPart?.category}
+                  footprint={selectedComp.footprint}
+                  customUrl={selectedComp.imageUrl}
+                  className="w-16 h-16 rounded-xl border border-slate-700 shadow-md shrink-0"
+                  badge={selectedComp.footprint.split(' ')[0]}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[10px] text-sky-400 font-mono font-bold uppercase tracking-wider">
+                    {selectedComp.realPart?.manufacturer || selectedComp.manufacturer || 'Hardware Product'}
+                  </div>
+                  <div className="text-sm font-black text-white truncate">
+                    {selectedComp.partNumber || selectedComp.value}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono truncate mt-0.5">
+                    Package: <span className="text-slate-200">{selectedComp.footprint}</span>
+                  </div>
+                  {selectedComp.realPart?.pinCount && (
+                    <div className="text-[10px] text-emerald-400 font-mono">
+                      {selectedComp.realPart.pinCount} Pins • Verified Datasheet
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Component Orientation & Directional Alignment */}
+            <div className="space-y-1.5 bg-slate-950/60 p-2 rounded-lg border border-slate-800">
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span className="font-semibold text-slate-300">Orientation & Rotation</span>
+                <span className="font-mono text-sky-400 font-bold">{selectedComp.rotation}°</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1 font-mono text-[10px]">
+                {([0, 90, 180, 270] as const).map((deg) => (
+                  <button
+                    key={deg}
+                    type="button"
+                    onClick={() => onUpdateComponent({ ...selectedComp, rotation: deg })}
+                    className={`py-1 rounded border transition-colors ${
+                      selectedComp.rotation === deg
+                        ? 'bg-sky-600 text-white border-sky-500 font-bold'
+                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-750'
+                    }`}
+                  >
+                    {deg}°
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-1 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = ((selectedComp.rotation + 270) % 360) as 0 | 90 | 180 | 270;
+                    onUpdateComponent({ ...selectedComp, rotation: next });
+                  }}
+                  className="flex-1 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 flex items-center justify-center gap-1 text-[10px]"
+                  title="Rotate -90° Counter-Clockwise"
+                >
+                  <RotateCcw className="w-3 h-3 text-sky-400" />
+                  <span>-90° CCW</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = ((selectedComp.rotation + 90) % 360) as 0 | 90 | 180 | 270;
+                    onUpdateComponent({ ...selectedComp, rotation: next });
+                  }}
+                  className="flex-1 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 flex items-center justify-center gap-1 text-[10px]"
+                  title="Rotate +90° Clockwise (R)"
+                >
+                  <RotateCw className="w-3 h-3 text-sky-400" />
+                  <span>+90° CW</span>
+                </button>
+              </div>
+            </div>
+
+            {/* AllDataSheet.com Component Verification & Datasheet Section */}
+            <div className="p-2.5 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/40 rounded-lg border border-indigo-900/50 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-300">
+                  <Globe className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>AllDataSheet.com</span>
+                </div>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-200 border border-indigo-700/50 font-mono">
+                  Datasheet
+                </span>
+              </div>
+
+              <p className="text-[10px] text-slate-400 leading-tight">
+                Inspect official manufacturer specifications, pinouts, and PDF datasheets from AllDataSheet.
+              </p>
+
+              <div className="flex flex-col gap-1.5 pt-0.5">
+                {onOpenAllDataSheetModal && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenAllDataSheetModal(selectedComp.value || selectedComp.designator)}
+                    className="w-full py-1.5 px-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[11px] font-semibold flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    <span>Search Datasheet for "{selectedComp.value || selectedComp.designator}"</span>
+                  </button>
+                )}
+                <a
+                  href={getAllDataSheetSearchUrl(selectedComp.value || selectedComp.designator)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-1 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] flex items-center justify-center gap-1 border border-slate-700 transition-colors"
+                  title="Open live search on https://www.alldatasheet.com/"
+                >
+                  <ExternalLink className="w-3 h-3 text-slate-400" />
+                  <span>View on AllDataSheet.com (Web)</span>
+                </a>
+              </div>
             </div>
 
             {/* Designator & Value Fields */}
@@ -477,10 +620,20 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
         {/* WIRE INSPECTOR */}
         {selectedWire && (
-          <div className="space-y-3">
-            <div className="font-semibold text-slate-100 flex items-center gap-1.5 pb-2 border-b border-slate-800">
-              <Zap className="w-4 h-4 text-emerald-400" />
-              Wire Segment
+          <div className="space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="font-semibold text-slate-100 flex items-center gap-1.5">
+                <Zap className="w-4 h-4 text-emerald-400" />
+                Wire Segment
+              </div>
+              <button
+                onClick={onDeleteSelected}
+                className="px-2 py-1 bg-red-950/60 hover:bg-red-900 border border-red-800/80 text-red-300 rounded flex items-center gap-1 font-mono text-[11px]"
+                title="Delete Wire (Del)"
+              >
+                <Trash2 className="w-3 h-3 text-red-400" />
+                Delete
+              </button>
             </div>
             <div>
               <label className="text-[11px] text-slate-400 font-medium mb-1 block">
@@ -493,6 +646,13 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             <div className="text-[11px] text-slate-400 font-mono">
               Points: {selectedWire.points.length} vertices
             </div>
+            <button
+              onClick={onDeleteSelected}
+              className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-red-950/40 hover:bg-red-900/60 border border-red-800/80 text-red-300 font-semibold rounded-lg text-xs transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+              Delete Wire (Del)
+            </button>
           </div>
         )}
 
@@ -505,63 +665,148 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               </label>
               <input
                 type="text"
-                value={document.title}
+                value={safeDoc.title || ''}
                 onChange={(e) => onUpdateDocumentMeta({ title: e.target.value })}
                 className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded text-slate-100 font-semibold text-xs focus:outline-none focus:border-sky-500"
               />
             </div>
 
-            {document.summary && (
+            {safeDoc.summary && (
               <div>
                 <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">
                   Circuit Summary
                 </label>
                 <p className="text-[11px] text-slate-300 leading-relaxed bg-slate-950/60 p-2.5 rounded border border-slate-800/80">
-                  {document.summary}
+                  {safeDoc.summary}
                 </p>
               </div>
             )}
 
-            {document.formula && (
+            {safeDoc.formula && (
               <div>
                 <label className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider block mb-1">
                   Design Formula
                 </label>
                 <div className="text-[11px] text-amber-200 font-mono bg-amber-950/30 p-2.5 rounded border border-amber-800/40">
-                  {document.formula}
+                  {safeDoc.formula}
                 </div>
               </div>
             )}
 
-            {document.specifications && document.specifications.length > 0 && (
+            {safeDoc.specifications && safeDoc.specifications.length > 0 && (
               <div>
                 <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">
                   Key Specifications
                 </label>
                 <ul className="space-y-1 text-[11px] text-slate-300 bg-slate-950/60 p-2.5 rounded border border-slate-800/80 list-disc list-inside">
-                  {document.specifications.map((spec, i) => (
+                  {safeDoc.specifications.map((spec, i) => (
                     <li key={i}>{spec}</li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {document.tips && document.tips.length > 0 && (
+            {safeDoc.tips && safeDoc.tips.length > 0 && (
               <div>
                 <label className="text-[11px] font-semibold text-sky-400 uppercase tracking-wider block mb-1">
                   Prototyping Tips
                 </label>
                 <ul className="space-y-1 text-[11px] text-slate-300 bg-slate-950/60 p-2.5 rounded border border-slate-800/80 list-disc list-inside">
-                  {document.tips.map((tip, i) => (
+                  {safeDoc.tips.map((tip, i) => (
                     <li key={i}>{tip}</li>
                   ))}
                 </ul>
               </div>
             )}
 
+            {/* Circuit-wide Rotation & Directional Verification */}
+            {onRotateCircuit && (
+              <div className="p-3 bg-slate-950/80 rounded-lg border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-sky-400 uppercase tracking-wider">
+                    Circuit Rotation & Check
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-mono">All Components</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1 text-[10px]">
+                  <button
+                    type="button"
+                    onClick={() => onRotateCircuit('cw90')}
+                    className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 flex flex-col items-center gap-0.5"
+                    title="Rotate entire schematic +90° Clockwise"
+                  >
+                    <RotateCw className="w-3.5 h-3.5 text-sky-400" />
+                    <span>+90° CW</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRotateCircuit('ccw90')}
+                    className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 flex flex-col items-center gap-0.5"
+                    title="Rotate entire schematic -90° Counter-Clockwise"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-sky-400" />
+                    <span>-90° CCW</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRotateCircuit('180')}
+                    className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 flex flex-col items-center gap-0.5"
+                    title="Rotate entire schematic 180° Invert"
+                  >
+                    <RotateCw className="w-3.5 h-3.5 text-amber-400" />
+                    <span>180° Invert</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRotateCircuit('flipH')}
+                    className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 flex flex-col items-center gap-0.5 col-span-1"
+                    title="Mirror / Flip Horizontally"
+                  >
+                    <FlipHorizontal className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Flip H</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRotateCircuit('flipV')}
+                    className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 flex flex-col items-center gap-0.5 col-span-2"
+                    title="Mirror / Flip Vertically"
+                  >
+                    <FlipVertical className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Flip V (Invert Altitude)</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* AllDataSheet Catalog Search Hub */}
+            {onOpenAllDataSheetModal && (
+              <div className="p-3 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/40 rounded-lg border border-indigo-900/50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-300">
+                    <Globe className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>AllDataSheet.com</span>
+                  </div>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-200 border border-indigo-700/50 font-mono">
+                    Catalog
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Search ICs, diodes, transistors, microcontrollers, and pinouts from AllDataSheet and place them into your circuit.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onOpenAllDataSheetModal()}
+                  className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+                >
+                  <Search className="w-3.5 h-3.5" />
+                  <span>Open AllDataSheet Catalog</span>
+                </button>
+              </div>
+            )}
+
             <div className="pt-3 border-t border-slate-800 text-[11px] text-slate-400 font-mono space-y-1">
-              <div>Total Components: {document.components.length}</div>
-              <div>Total Wires: {document.wires.length}</div>
+              <div>Total Components: {(safeDoc.components || []).length}</div>
+              <div>Total Wires: {(safeDoc.wires || []).length}</div>
             </div>
           </div>
         )}

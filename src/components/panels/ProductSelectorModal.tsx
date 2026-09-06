@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SchematicComponent } from '../../types';
 import { REAL_PRODUCT_CATALOG, RealProductPart } from '../../data/realComponents';
+import { RealProductImage } from '../../utils/componentImages';
 import {
   Search,
   Check,
@@ -121,36 +122,44 @@ export const ProductSelectorModal: React.FC<ProductSelectorModalProps> = ({
                   key={part.id}
                   className="pt-2.5 first:pt-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 rounded-lg hover:bg-slate-800/60 border border-transparent hover:border-slate-700/60 transition-colors"
                 >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono font-bold text-sm text-sky-400">
-                        {part.manufacturerPartNumber}
-                      </span>
-                      <span className="text-xs font-medium text-slate-300">
-                        {part.manufacturer}
-                      </span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
-                        {part.packageFootprint}
-                      </span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 font-mono">
-                        {part.supplier}: {part.supplierPartNumber}
-                      </span>
-                    </div>
-
-                    <p className="text-xs text-slate-300 mt-1">
-                      {part.description}
-                    </p>
-
-                    <div className="flex items-center gap-4 mt-1.5 text-[11px] text-slate-400 font-mono">
-                      {part.voltageRating && <span>Rating: {part.voltageRating}</span>}
-                      {part.powerRating && <span>Power: {part.powerRating}</span>}
-                      {part.tolerance && <span>Tol: {part.tolerance}</span>}
-                      <span className="text-emerald-400 font-semibold">Unit: {part.unitPrice}</span>
-                      {part.inStock && (
-                        <span className="text-emerald-400 flex items-center gap-1">
-                          <ShieldCheck className="w-3 h-3" /> In Stock
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <RealProductImage
+                      partNumberOrType={part.manufacturerPartNumber}
+                      category={part.category}
+                      footprint={part.packageFootprint}
+                      className="w-12 h-12 rounded-lg border border-slate-700 shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-bold text-sm text-sky-400">
+                          {part.manufacturerPartNumber}
                         </span>
-                      )}
+                        <span className="text-xs font-medium text-slate-300">
+                          {part.manufacturer}
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
+                          {part.packageFootprint}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 font-mono">
+                          {part.supplier}: {part.supplierPartNumber}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-slate-300 mt-1">
+                        {part.description}
+                      </p>
+
+                      <div className="flex items-center gap-4 mt-1.5 text-[11px] text-slate-400 font-mono">
+                        {part.voltageRating && <span>Rating: {part.voltageRating}</span>}
+                        {part.powerRating && <span>Power: {part.powerRating}</span>}
+                        {part.tolerance && <span>Tol: {part.tolerance}</span>}
+                        <span className="text-emerald-400 font-semibold">Unit: {part.unitPrice}</span>
+                        {part.inStock && (
+                          <span className="text-emerald-400 flex items-center gap-1">
+                            <ShieldCheck className="w-3 h-3" /> In Stock
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 

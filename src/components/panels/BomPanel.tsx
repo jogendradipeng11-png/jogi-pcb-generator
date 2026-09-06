@@ -1,5 +1,6 @@
 import React from 'react';
 import { SchematicComponent } from '../../types';
+import { RealProductImage } from '../../utils/componentImages';
 import { Download, Layers, X, FileSpreadsheet } from 'lucide-react';
 
 interface BomPanelProps {
@@ -122,6 +123,7 @@ export const BomPanel: React.FC<BomPanelProps> = ({
             <thead>
               <tr className="border-b border-slate-800 text-slate-400 font-mono">
                 <th className="py-2.5 px-3">#</th>
+                <th className="py-2.5 px-3">Product</th>
                 <th className="py-2.5 px-3">Designator</th>
                 <th className="py-2.5 px-3">Qty</th>
                 <th className="py-2.5 px-3">Value</th>
@@ -133,6 +135,13 @@ export const BomPanel: React.FC<BomPanelProps> = ({
               {bomRows.map((row) => (
                 <tr key={row.index} className="hover:bg-slate-800/40 transition-colors">
                   <td className="py-2 px-3 text-slate-500">{row.index}</td>
+                  <td className="py-2 px-3">
+                    <RealProductImage
+                      partNumberOrType={row.value || row.type}
+                      footprint={row.footprint}
+                      className="w-8 h-8 rounded border border-slate-700"
+                    />
+                  </td>
                   <td className="py-2 px-3 font-semibold text-sky-400">
                     {row.designators.join(', ')}
                   </td>

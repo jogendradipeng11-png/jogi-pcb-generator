@@ -92,21 +92,56 @@ export function stepCircuitSimulation(
   const netVoltages: Record<string, number> = {
     GND: 0.0,
     '0V': 0.0,
+    EARTH: 0.0,
+    PE: 0.0,
   };
   const pinVoltages: Record<string, number> = {};
   const wireCurrents: Record<string, number> = {};
   const componentResults: Record<string, ComponentSimResult> = {};
+  const warnings: string[] = [];
 
+  const opCond = prevState.operatingConditions;
+  const tempC = opCond?.temperature ?? 25;
   // 1. Identify primary DC power rails
-  let primaryVcc = 5.0; // default baseline
+  let primaryVcc = opCond?.supplyVoltage ?? 5.0; // default baseline (can be overridden by scenario)
   for (const c of components) {
-    if (c.type === 'vcc') {
-      const v = c.testSettings?.voltage ?? parseUnitValue(c.value, 5.0);
+    if (c.type === 'dc_source') {
+      const v = c.testSettings?.voltage ?? (opCond?.supplyVoltage ?? parseUnitValue(c.value, 12.0));
+      primaryVcc = v;
+      const posNet = c.pins.find((p) => p.id === '1' || p.name === '+')?.net || 'VCC';
+      const negNet = c.pins.find((p) => p.id === '2' || p.name === '-')?.net || 'GND';
+      netVoltages[posNet] = v;
+      netVoltages[negNet] = 0.0;
       netVoltages['VCC'] = v;
-      netVoltages['+5V'] = v;
+      componentResults[c.id] = {
+        current: 0.08,
+        power: v * 0.08,
+        voltageDrop: v,
+        state: `SOURCE ${formatVoltage(v)} (+ / -)`,
+      };
+    } else if (c.type === 'source_pos_point') {
+      const v = c.testSettings?.voltage ?? (opCond?.supplyVoltage ?? parseUnitValue(c.value, 12.0));
+      primaryVcc = v;
+      const posNet = c.pins[0]?.net || 'VCC';
+      netVoltages[posNet] = v;
+      netVoltages['VCC'] = v;
+    } else if (c.type === 'source_neg_point') {
+      const negNet = c.pins[0]?.net || 'GND';
+      netVoltages[negNet] = 0.0;
+      netVoltages['GND'] = 0.0;
+    } else if (c.type === 'earth_ground') {
+      const earthNet = c.pins[0]?.net || 'EARTH';
+      netVoltages[earthNet] = 0.0;
+      netVoltages['EARTH'] = 0.0;
+      netVoltages['PE'] = 0.0;
+    } else if (c.type === 'vcc' || c.type === 'vcc_3v3') {
+      const defaultVal = c.type === 'vcc_3v3' ? 3.3 : 5.0;
+      const v = c.testSettings?.voltage ?? (opCond?.supplyVoltage ?? parseUnitValue(c.value, defaultVal));
+      netVoltages['VCC'] = v;
+      netVoltages[c.type === 'vcc_3v3' ? '+3.3V' : '+5V'] = v;
       primaryVcc = v;
     } else if (c.type === 'battery') {
-      const v = c.testSettings?.voltage ?? parseUnitValue(c.value, 9.0);
+      const v = c.testSettings?.voltage ?? (opCond?.supplyVoltage ?? parseUnitValue(c.value, 9.0));
       primaryVcc = v;
       const posNet = c.pins.find((p) => p.id === '1' || p.name === '+')?.net || '9V';
       const negNet = c.pins.find((p) => p.id === '2' || p.name === '-')?.net || 'GND';
@@ -135,7 +170,7 @@ export function stepCircuitSimulation(
     }
 
     netVoltages[outNet] = vout;
-    const loadCurrent = 0.05; // 50mA nominal test load
+    const loadCurrent = opCond?.loadCondition === 'heavy' ? 0.15 : opCond?.loadCondition === 'no_load' ? 0.005 : 0.05;
     const power = Math.max(0, vin - vout) * loadCurrent;
 
     componentResults[reg.id] = {
@@ -150,6 +185,39 @@ export function stepCircuitSimulation(
   // 3. Identify NE555 Timer Astable Oscillators
   const ne555 = components.find((c) => c.type === 'ic_ne555');
   if (ne555) {
+    const dischPin = ne555.pins.find((p) => p.name === 'DISCH' || p.id === '7');
+    const resetPin = ne555.pins.find((p) => p.name === 'RESET' || p.id === '4');
+    const gndPin = ne555.pins.find((p) => p.name === 'GND' || p.id === '1');
+    const vccPinNet = ne555.pins.find((p) => p.id === '8' || p.name === 'VCC')?.net;
+    const vcc = vccPinNet ? (netVoltages[vccPinNet] ?? primaryVcc) : primaryVcc;
+
+    // Check if DISCH pin is connected
+    const isDischConnected = Boolean(dischPin?.net && dischPin.net.trim() !== '');
+    // Check if RESET pin is pulled high to VCC
+    const resetNetV = resetPin?.net ? (netVoltages[resetPin.net] ?? primaryVcc) : primaryVcc;
+    const isResetAsserted = resetPin?.net ? resetNetV < 0.8 : false;
+    // Check if GND pin is properly connected to ground
+    const gndNetV = gndPin?.net ? (netVoltages[gndPin.net] ?? 0) : 0;
+    const isGndMiswired = gndPin?.net ? gndNetV > 1.5 : false;
+
+    if (!isDischConnected) {
+      warnings.push(
+        '⚠️ NE555 Error: Pin 7 (DISCH) is disconnected! The timing capacitor cannot discharge, halting oscillation (0.0Hz). Connect Pin 7 between R1 and R2.'
+      );
+    }
+    if (isResetAsserted) {
+      warnings.push(
+        '⚠️ NE555 Error: Pin 4 (RESET) is LOW or connected to the timing node! Connect RESET (Pin 4) directly to VCC (+V) for astable operation.'
+      );
+    }
+    if (isGndMiswired) {
+      warnings.push(
+        `⚠️ NE555 Error: Pin 1 (GND) is at ${gndNetV.toFixed(1)}V! Connect Pin 1 directly to 0V ground.`
+      );
+    }
+
+    const canOscillate = isDischConnected && !isResetAsserted && !isGndMiswired;
+
     // Find timing resistors R1, R2, C1
     const r1Comp = components.find((c) => c.designator === 'R1') || components.find((c) => c.type === 'resistor');
     const r2Comp = components.find((c) => c.designator === 'R2');
@@ -163,39 +231,40 @@ export function stepCircuitSimulation(
     const tHigh = 0.693 * (r1Val + r2Val) * c1Val;
     const tLow = 0.693 * r2Val * c1Val;
     const period = Math.max(0.0001, tHigh + tLow);
-    const realFreq = 1 / period;
-    const dutyCycle = ((tHigh / period) * 100);
+    const realFreq = canOscillate ? (1 / period) : 0.0;
+    const dutyCycle = canOscillate ? ((tHigh / period) * 100) : 0.0;
 
     // Visual simulation period (scaled between 0.3s and 3.0s for clear visibility on screen)
     const visualPeriod = Math.max(0.4, Math.min(3.0, period));
     const phase = (time % visualPeriod) / visualPeriod;
-    const isHigh = phase < (tHigh / period);
+    const isHigh = canOscillate ? (phase < (tHigh / period)) : false;
 
-    const vccPinNet = ne555.pins.find((p) => p.id === '8')?.net;
-    const vcc = vccPinNet ? (netVoltages[vccPinNet] ?? primaryVcc) : primaryVcc;
-
-    // Pin 3 (Output): Alternates between (Vcc - 1.4V) and 0.1V
+    // Pin 3 (Output): Alternates between (Vcc - 1.4V) and 0.1V when oscillating
     const vOut = isHigh ? Math.max(0, vcc - 1.35) : 0.08;
-    const outNet = ne555.pins.find((p) => p.id === '3')?.net || 'OUT_555';
+    const outNet = ne555.pins.find((p) => p.id === '3' || p.name === 'OUT')?.net || 'OUT_555';
     netVoltages[outNet] = vOut;
 
     // Pin 2 & 6 (Threshold / Trigger): Exponential RC waveform between 1/3 Vcc and 2/3 Vcc
     const vCapMin = vcc / 3;
     const vCapMax = (2 * vcc) / 3;
     let vCap = vCapMin;
-    if (isHigh) {
-      // Charging
-      const chargeRatio = phase / (tHigh / period);
-      vCap = vCapMin + (vCapMax - vCapMin) * (1 - Math.exp(-3 * chargeRatio));
+    if (canOscillate) {
+      if (isHigh) {
+        // Charging
+        const chargeRatio = phase / (tHigh / period);
+        vCap = vCapMin + (vCapMax - vCapMin) * (1 - Math.exp(-3 * chargeRatio));
+      } else {
+        // Discharging
+        const dischargeRatio = (phase - (tHigh / period)) / (1 - (tHigh / period));
+        vCap = vCapMax - (vCapMax - vCapMin) * (1 - Math.exp(-3 * dischargeRatio));
+      }
     } else {
-      // Discharging
-      const dischargeRatio = (phase - (tHigh / period)) / (1 - (tHigh / period));
-      vCap = vCapMax - (vCapMax - vCapMin) * (1 - Math.exp(-3 * dischargeRatio));
+      vCap = !isDischConnected ? vCapMax : 0.0;
     }
 
-    const trigNet = ne555.pins.find((p) => p.id === '2')?.net;
+    const trigNet = ne555.pins.find((p) => p.id === '2' || p.name === 'TRIG')?.net;
     if (trigNet) netVoltages[trigNet] = vCap;
-    const threshNet = ne555.pins.find((p) => p.id === '6')?.net;
+    const threshNet = ne555.pins.find((p) => p.id === '6' || p.name === 'THRES')?.net;
     if (threshNet) netVoltages[threshNet] = vCap;
 
     componentResults[ne555.id] = {
@@ -204,7 +273,13 @@ export function stepCircuitSimulation(
       voltageDrop: vcc,
       frequency: realFreq,
       dutyCycle,
-      state: isHigh ? 'OUTPUT HIGH' : 'OUTPUT LOW',
+      state: !canOscillate
+        ? 'STALLED (0.0Hz - Wiring Error)'
+        : isHigh
+        ? 'OUTPUT HIGH'
+        : 'OUTPUT LOW',
+      isOverloaded: !canOscillate,
+      warning: !canOscillate ? 'Oscillation halted due to wiring fault' : undefined,
     };
   }
 
@@ -215,7 +290,8 @@ export function stepCircuitSimulation(
     const vcc = vccNet ? (netVoltages[vccNet] ?? primaryVcc) : primaryVcc;
 
     // Simulate preamplifier audio wave
-    const inWave = 0.2 * Math.sin(2 * Math.PI * 2.0 * time) + 0.3; // 2Hz test tone
+    const audioFreq = opCond?.frequency ?? 2.0;
+    const inWave = 0.2 * Math.sin(2 * Math.PI * audioFreq * time) + 0.3;
     const gain = 10.0;
     const outVoltage = Math.min(vcc - 1.2, Math.max(0.1, inWave * gain));
 
@@ -233,7 +309,7 @@ export function stepCircuitSimulation(
   // 5. Switches and Push buttons
   const switches = components.filter((c) => c.type === 'switch' || c.type === 'pushbutton');
   for (const sw of switches) {
-    const isClosed = sw.testSettings?.isClosed ?? true; // Default closed
+    const isClosed = opCond?.switchStates?.[sw.id] ?? (sw.testSettings?.isClosed ?? true); // Default closed
     const p1Net = sw.pins[0]?.net;
     const p2Net = sw.pins[1]?.net;
 
@@ -284,23 +360,80 @@ export function stepCircuitSimulation(
       const vA = anodeNet ? (netVoltages[anodeNet] ?? 0) : 0;
       const vK = cathodeNet ? (netVoltages[cathodeNet] ?? 0) : 0;
 
-      const vf = comp.testSettings?.forwardVoltage ?? (comp.type === 'led' ? 1.85 : 0.65);
+      const thermalShift = (tempC - 25) * -0.002;
+      const baseVf = comp.testSettings?.forwardVoltage ?? (comp.type === 'led' ? 1.85 : 0.65);
+      const vf = Math.max(0.15, baseVf + thermalShift);
       const forwardBias = vA - vK;
+
+      // Find series resistor sharing the LED's anode or cathode net
+      let seriesR = 0;
+      const seriesResistor = components.find(
+        (c) =>
+          (c.type === 'resistor' || c.type === 'potentiometer') &&
+          c.pins.some((p) => p.net && (p.net === anodeNet || p.net === cathodeNet))
+      );
+
+      if (seriesResistor) {
+        seriesR = parseUnitValue(seriesResistor.value, 470);
+        if (seriesResistor.type === 'potentiometer') {
+          seriesR = Math.max(10, seriesR * (seriesResistor.testSettings?.wiper ?? 0.5));
+        }
+      } else {
+        // Direct connection without limiting resistor (only internal parasitic/source ~20 ohms)
+        seriesR = 20;
+      }
 
       let current = 0.0;
       let isLit = false;
+      let isOverloaded = false;
+      let isBurnedOut = false;
+      let warning: string | undefined = undefined;
 
       if (forwardBias > vf) {
-        // Nominal current limited by series loop resistance ~330-1000 ohms
-        current = Math.min(0.03, (forwardBias - vf) / 330);
-        isLit = current > 0.001;
+        current = (forwardBias - vf) / seriesR;
+        isLit = current > 0.0005;
+
+        if (comp.type === 'led') {
+          if (current > 0.030 || (!seriesResistor && forwardBias > 2.5)) {
+            // Over 30mA or connected directly to high voltage without current-limiting resistor -> BURST / BURNT OUT!
+            isOverloaded = true;
+            isBurnedOut = true;
+            const currentmA = (current * 1000).toFixed(1);
+            warning = `🔥 CRITICAL BURNOUT: ${comp.designator} destroyed! Current (${currentmA}mA > 25mA max) melted the internal bond wire. Increase series resistor value or lower supply voltage.`;
+            warnings.push(warning);
+          } else if (current > 0.020) {
+            // Over 20mA (rated continuous current exceeded)
+            isOverloaded = true;
+            const currentmA = (current * 1000).toFixed(1);
+            warning = `⚠️ OVERCURRENT: ${comp.designator} current (${currentmA}mA) exceeds 20mA rating. Risk of thermal degradation and burnout if voltage increases further.`;
+            warnings.push(warning);
+          }
+        }
+      } else if (forwardBias < -5.0 && comp.type === 'led') {
+        // Reverse breakdown on LED (> 5V reverse voltage causes PN junction breakdown!)
+        isOverloaded = true;
+        isBurnedOut = true;
+        warning = `⚡ REVERSE BREAKDOWN: ${comp.designator} reverse bias (${Math.abs(forwardBias).toFixed(1)}V > 5V max) exceeds LED reverse breakdown limit!`;
+        warnings.push(warning);
+      }
+
+      let stateText = 'OFF';
+      if (isBurnedOut) {
+        stateText = `🔥 BURST / DAMAGED (${(current * 1000).toFixed(1)}mA)`;
+      } else if (isOverloaded) {
+        stateText = `⚠️ OVERCURRENT (${(current * 1000).toFixed(1)}mA)`;
+      } else if (isLit) {
+        stateText = `LIT (${(current * 1000).toFixed(1)}mA)`;
       }
 
       componentResults[comp.id] = {
         current,
-        power: forwardBias * current,
+        power: Math.max(0, forwardBias * current),
         voltageDrop: Math.max(0, forwardBias),
-        state: isLit ? `LIT (${(current * 1000).toFixed(1)}mA)` : 'OFF',
+        state: stateText,
+        isOverloaded,
+        isBurnedOut,
+        warning,
       };
     } else if (comp.type === 'npn_bjt') {
       const baseNet = comp.pins[0]?.net;
@@ -350,18 +483,50 @@ export function stepCircuitSimulation(
     wireCurrents[wire.id] = i;
   }
 
-  // 9. Record samples for Probed Nets (for the Virtual Oscilloscope)
+  // 9. Record samples for Probed Nets, Wires, and Pins (for Oscilloscope & Floating Transient Probe)
   const probedWaveforms = { ...prevState.probedWaveforms };
-  const maxSamples = 120; // 120 historic points for waveform buffer
+  const maxSamples = 160; // Rolling window for transient analysis
 
-  for (const net of prevState.probedNets) {
-    const v = netVoltages[net] ?? 0.0;
-    const history = probedWaveforms[net] ? [...probedWaveforms[net]] : [];
-    history.push({ time, voltage: v });
+  for (const probeKey of prevState.probedNets) {
+    let v = 0.0;
+    let i = 0.0;
+
+    if (probeKey.startsWith('wire:')) {
+      const wireId = probeKey.slice(5);
+      const wire = wires.find((w) => w.id === wireId);
+      v = wire && wire.net ? (netVoltages[wire.net] ?? 0.0) : 0.0;
+      i = wire ? (wireCurrents[wire.id] ?? 0.0) : 0.0;
+    } else if (probeKey.startsWith('pin:')) {
+      const pinKey = probeKey.slice(4); // compId:pinId
+      v = pinVoltages[pinKey] ?? 0.0;
+      const colonIdx = pinKey.indexOf(':');
+      const compId = colonIdx !== -1 ? pinKey.slice(0, colonIdx) : pinKey;
+      const comp = components.find((c) => c.id === compId);
+      i = comp && componentResults[comp.id] ? componentResults[comp.id].current : 0.0;
+    } else {
+      // Named Net
+      v = netVoltages[probeKey] ?? 0.0;
+      // Derive active branch current on this net
+      for (const wire of wires) {
+        if (wire.net === probeKey && wireCurrents[wire.id]) {
+          i = Math.max(i, wireCurrents[wire.id]);
+        }
+      }
+      if (i === 0.0) {
+        for (const comp of components) {
+          if (comp.pins.some((p) => p.net === probeKey) && componentResults[comp.id]) {
+            i = Math.max(i, componentResults[comp.id].current);
+          }
+        }
+      }
+    }
+
+    const history = probedWaveforms[probeKey] ? [...probedWaveforms[probeKey]] : [];
+    history.push({ time, voltage: v, current: i });
     if (history.length > maxSamples) {
       history.shift();
     }
-    probedWaveforms[net] = history;
+    probedWaveforms[probeKey] = history;
   }
 
   return {
@@ -372,5 +537,9 @@ export function stepCircuitSimulation(
     wireCurrents,
     componentResults,
     probedWaveforms,
+    warnings,
+    activeScenarioId: prevState.activeScenarioId,
+    activeScenarioName: prevState.activeScenarioName,
+    operatingConditions: prevState.operatingConditions,
   };
 }

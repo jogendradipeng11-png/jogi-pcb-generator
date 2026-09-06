@@ -7,7 +7,9 @@ export type ComponentCategory =
   | 'ics'
   | 'switches'
   | 'electromechanical'
-  | 'connectors';
+  | 'connectors'
+  | 'sensors'
+  | 'modules';
 
 export interface PinDefinition {
   id: string; // "1", "2", "VCC", "GND", etc.
@@ -31,6 +33,7 @@ export interface ComponentDefinition {
   pins: PinDefinition[];
   description: string;
   symbol: string; // SVG path or shape identifier
+  imageUrl?: string;
 }
 
 export interface ComponentPinState {
@@ -55,6 +58,7 @@ export interface ComponentTestSettings {
 export interface SchematicComponent {
   id: string;
   type: string;
+  category?: ComponentCategory;
   designator: string; // e.g. "R1", "U1"
   value: string; // e.g. "10kΩ", "100nF", "NE555"
   footprint: string; // e.g. "R0805", "DIP-8"
@@ -65,6 +69,43 @@ export interface SchematicComponent {
   pins: ComponentPinState[];
   selected?: boolean;
   testSettings?: ComponentTestSettings;
+  pcbX?: number; // Physical PCB placement X (px/mm)
+  pcbY?: number; // Physical PCB placement Y (px/mm)
+  pcbRotation?: number; // Physical PCB rotation (0, 90, 180, 270)
+  alldatasheetUrl?: string; // Reference link to https://www.alldatasheet.com/
+  manufacturer?: string;
+  partNumber?: string;
+  datasheetDescription?: string;
+  datasheetSpecs?: Record<string, string>;
+  realPart?: any;
+  imageUrl?: string;
+}
+
+export type CircuitRotationDirection = 'cw90' | 'ccw90' | '180' | 'flipH' | 'flipV';
+
+export interface AllDataSheetPin {
+  pin: number | string;
+  name: string;
+  description: string;
+  type: 'power' | 'ground' | 'input' | 'output' | 'passive' | 'bidirectional';
+}
+
+export interface AllDataSheetComponent {
+  id: string;
+  partNumber: string;
+  manufacturer: string;
+  category: string;
+  description: string;
+  package: string;
+  pinCount: number;
+  alldatasheetUrl: string; // e.g. https://www.alldatasheet.com/view.jsp?Searchword=...
+  pdfUrl?: string;
+  specs: Record<string, string>;
+  pinout: AllDataSheetPin[];
+  applicationNotes?: string;
+  replacementEquivalents?: string[];
+  schematicSymbolType?: string;
+  imageUrl?: string;
 }
 
 export interface SimulationSample {
@@ -79,8 +120,34 @@ export interface ComponentSimResult {
   voltageDrop: number; // in Volts
   state?: string; // e.g. "ON", "OFF", "ACTIVE", "SATURATED", "DROPOUT"
   isOverloaded?: boolean;
+  isBurnedOut?: boolean;
+  warning?: string;
   frequency?: number; // for oscillators
   dutyCycle?: number;
+}
+
+export interface OperatingConditions {
+  supplyVoltage: number; // Volts (e.g. 3.3, 5.0, 9.0, 12.0)
+  temperature: number; // Ambient temp in °C (e.g. 25, 70, 85, -20)
+  simSpeed: number; // Speed multiplier (e.g. 0.5, 1, 2, 5)
+  loadCondition?: 'nominal' | 'heavy' | 'no_load' | 'stress';
+  tolerance?: number; // Component tolerance ±%
+  frequency?: number; // Test signal generator frequency (Hz)
+  switchStates?: Record<string, boolean>; // Component ID -> isClosed
+  notes?: string;
+}
+
+export interface SimulationScenario {
+  id: string;
+  name: string;
+  description: string;
+  badge?: string;
+  category?: 'standard' | 'power' | 'stress' | 'speed' | 'audio' | 'custom';
+  probedNets: string[]; // Monitored net names, pin keys or wire keys
+  operatingConditions: OperatingConditions;
+  componentOverrides?: Record<string, Partial<ComponentTestSettings>>;
+  isBuiltIn?: boolean;
+  createdAt?: string;
 }
 
 export interface SimulationState {
@@ -93,6 +160,10 @@ export interface SimulationState {
   componentResults: Record<string, ComponentSimResult>;
   probedNets: string[]; // nets currently monitored on the oscilloscope
   probedWaveforms: Record<string, SimulationSample[]>;
+  warnings?: string[];
+  activeScenarioId?: string;
+  activeScenarioName?: string;
+  operatingConditions?: OperatingConditions;
 }
 
 export interface Point {
@@ -149,9 +220,23 @@ export interface SchematicDocument {
   updatedAt: string;
 }
 
-export type EditorTool = 'select' | 'wire' | 'pan' | 'erase' | 'netlabel';
+export interface ProbeTarget {
+  id: string; // e.g. "wire:wire_1" or "pin:comp_1:pin_2"
+  type: 'wire' | 'pin';
+  label: string; // e.g. "Wire (OUT_555)" or "U1 Pin 3 (OUT)"
+  subLabel?: string; // e.g. "Net: OUT_555" or "NE555 Timer • Pin 3"
+  netName?: string;
+  componentId?: string;
+  pinId?: string;
+  wireId?: string;
+  worldPosition?: Point;
+  screenPosition?: Point;
+  color?: string;
+}
 
-export type CanvasViewMode = 'schematic' | 'pcb' | '3d' | 'bom' | 'erc' | 'netlist';
+export type EditorTool = 'select' | 'wire' | 'pan' | 'erase' | 'netlabel' | 'probe';
+
+export type CanvasViewMode = 'schematic' | 'pcb' | '3d' | 'panel' | 'bom' | 'erc' | 'netlist';
 
 export interface ErcIssue {
   id: string;
@@ -196,3 +281,45 @@ export interface PcbTrace {
   width: number;
   points: Point[];
 }
+
+// User Profile & Authentication
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  whatsappNumber?: string;
+  isWhatsappVerified?: boolean;
+  avatar?: string;
+  role?: 'student' | 'engineer' | 'maker' | 'pro';
+  createdAt: string;
+  savedCircuitsCount?: number;
+  customComponentsCount?: number;
+}
+
+export interface GoogleSearchResultItem {
+  id: string;
+  title: string;
+  type: 'component' | 'circuit';
+  category?: string;
+  description: string;
+  manufacturer?: string;
+  partNumber?: string;
+  datasheetUrl?: string;
+  googleSearchUrl?: string;
+  supplyVoltage?: string;
+  footprint?: string;
+  pins?: {
+    id: string;
+    name: string;
+    direction?: 'left' | 'right' | 'top' | 'bottom';
+    type?: 'input' | 'output' | 'passive' | 'power' | 'ground' | 'bidirectional';
+  }[];
+  // Subcircuit payload if type === 'circuit'
+  circuitData?: {
+    title: string;
+    summary: string;
+    components: SchematicComponent[];
+    wires?: Wire[];
+  };
+}
+

@@ -71,6 +71,15 @@ export const OscilloscopePanel: React.FC<OscilloscopePanelProps> = ({
               <span className="text-[10px] px-1.5 py-0.2 bg-emerald-950 text-emerald-300 border border-emerald-800 rounded font-mono">
                 {simulationState.isRunning ? 'LIVE 60FPS' : 'PAUSED'}
               </span>
+              {simulationState.activeScenarioName && (
+                <span
+                  className="text-[10px] px-2 py-0.2 bg-sky-950 text-sky-300 border border-sky-800 rounded font-medium flex items-center gap-1 max-w-[220px] truncate"
+                  title={`Active Scenario: ${simulationState.activeScenarioName} (${simulationState.operatingConditions?.supplyVoltage ?? 5}V, ${simulationState.operatingConditions?.temperature ?? 25}°C)`}
+                >
+                  <span className="text-slate-400">Scenario:</span>
+                  <span className="font-semibold truncate">{simulationState.activeScenarioName}</span>
+                </span>
+              )}
             </span>
           </div>
         </div>

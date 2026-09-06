@@ -3,6 +3,7 @@ import { getPinWorldPosition, generateOrthogonalPath } from './geometry';
 
 export interface AutoRouteResult {
   newWires: Wire[];
+  allWires: Wire[];
   updatedComponents: SchematicComponent[];
   connectionsCount: number;
 }
@@ -23,20 +24,46 @@ export function autoRouteSchematicNets(
   }
 
   const netPinMap = new Map<string, PinTarget[]>();
+  const updatedComponents = components.map((comp) => ({
+    ...comp,
+    pins: comp.pins.map((pin) => ({ ...pin })),
+  }));
 
-  for (const comp of components) {
+  // Standard electronic bus signals for MCU, Sensor, and IC interconnects
+  const normalizeNetName = (rawNetOrPin: string): string => {
+    const trimmed = rawNetOrPin.trim();
+    if (!trimmed || trimmed.toUpperCase() === 'NC') return '';
+    const upper = trimmed.toUpperCase();
+    if (['VCC', 'VDD', 'VIN', '+5V', '5V', 'POWER'].includes(upper)) return 'VCC';
+    if (['GND', '0V', 'GROUND', 'VSS'].includes(upper)) return 'GND';
+    if (['3V3', '+3V3', '3.3V'].includes(upper)) return '+3.3V';
+    if (['SDA', 'I2C_SDA'].includes(upper)) return 'SDA';
+    if (['SCL', 'I2C_SCL'].includes(upper)) return 'SCL';
+    if (['TX', 'TXD', 'UART_TX'].includes(upper)) return 'TX';
+    if (['RX', 'RXD', 'UART_RX'].includes(upper)) return 'RX';
+    if (['SCK', 'SPI_SCK'].includes(upper)) return 'SCK';
+    if (['MISO', 'SPI_MISO'].includes(upper)) return 'MISO';
+    if (['MOSI', 'SPI_MOSI'].includes(upper)) return 'MOSI';
+    return upper;
+  };
+
+  for (const comp of updatedComponents) {
     for (const pin of comp.pins) {
-      if (pin.net && pin.net.trim() !== '' && pin.net.toUpperCase() !== 'NC') {
+      const explicitNet = pin.net?.trim();
+      const normNet = explicitNet ? normalizeNetName(explicitNet) : normalizeNetName(pin.name);
+
+      if (normNet) {
+        pin.net = normNet; // assign back to pin
         const pos = getPinWorldPosition(comp, pin.id);
-        const list = netPinMap.get(pin.net) || [];
+        const list = netPinMap.get(normNet) || [];
         list.push({
           componentId: comp.id,
           pinId: pin.id,
           pinName: pin.name,
-          net: pin.net,
+          net: normNet,
           pos,
         });
-        netPinMap.set(pin.net, list);
+        netPinMap.set(normNet, list);
       }
     }
   }
@@ -106,8 +133,9 @@ export function autoRouteSchematicNets(
   }
 
   return {
-    newWires: [...existingWires, ...generatedWires],
-    updatedComponents: components,
+    newWires: generatedWires,
+    allWires: [...existingWires, ...generatedWires],
+    updatedComponents,
     connectionsCount,
   };
 }

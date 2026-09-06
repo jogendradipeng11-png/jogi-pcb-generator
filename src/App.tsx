@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   SchematicDocument,
   EditorTool,
@@ -8,13 +8,20 @@ import {
   SchematicComponent,
   Wire,
   SimulationState,
+  SimulationScenario,
+  OperatingConditions,
+  UserProfile,
+  AllDataSheetComponent,
+  CircuitRotationDirection,
 } from './types';
 import { STARTER_CIRCUITS } from './data/examples';
+import { getComponentDef } from './data/components';
 import { Header } from './components/layout/Header';
 import { SchematicCanvas } from './components/schematic/SchematicCanvas';
 import { PcbCanvas } from './components/pcb/PcbCanvas';
 import { ComponentLibraryPanel } from './components/panels/ComponentLibraryPanel';
 import { PropertiesPanel } from './components/panels/PropertiesPanel';
+import { AllDataSheetModal } from './components/panels/AllDataSheetModal';
 import { AiCircuitModal } from './components/ai/AiCircuitModal';
 import { BomPanel } from './components/panels/BomPanel';
 import { ErcPanel } from './components/panels/ErcPanel';
@@ -22,19 +29,102 @@ import { NetlistPanel } from './components/panels/NetlistPanel';
 import { OscilloscopePanel } from './components/simulation/OscilloscopePanel';
 import { Pcb3DViewer } from './components/pcb/Pcb3DViewer';
 import { PrintPdfModal } from './components/panels/PrintPdfModal';
+import { UniversalFileModal } from './components/panels/UniversalFileModal';
+import { GoogleReferenceModal } from './components/panels/GoogleReferenceModal';
 import { ProductSelectorModal } from './components/panels/ProductSelectorModal';
+import { IndustrialPanelDiagram } from './components/panels/IndustrialPanelDiagram';
+import { AuthModal } from './components/auth/AuthModal';
+import { KeyboardShortcutsModal } from './components/help/KeyboardShortcutsModal';
+import { KeyboardShortcutsOverlay } from './components/help/KeyboardShortcutsOverlay';
+import { GitHubDeployModal } from './components/modals/GitHubDeployModal';
+import { getCurrentUser, setCurrentUser, subscribeToAuthChanges } from './utils/authService';
+import { loadUserSavedComponents } from './utils/userComponents';
 import { stepCircuitSimulation } from './utils/simulation';
 import { generateGerberZip } from './utils/gerber';
 import { autoRouteSchematicNets } from './utils/autorouter';
 import { reannotateComponents } from './utils/annotation';
+import { rotateCircuit } from './utils/circuitTransform';
+import { getComponentRealImageUrl } from './utils/componentImages';
 import { Sparkles, HelpCircle, Layers, Cpu, Activity, CheckCircle2 } from 'lucide-react';
+
+// Ensure all component and wire IDs are strictly unique and document is guaranteed valid
+function sanitizeDocument(doc?: Partial<SchematicDocument> | null): SchematicDocument {
+  const fallback = (STARTER_CIRCUITS && STARTER_CIRCUITS[0]) || {
+    id: 'starter_circuit_fallback',
+    title: 'Circuit Schematic',
+    category: 'General',
+    summary: 'Standard schematic circuit diagram.',
+    components: [],
+    wires: [],
+    version: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const base = doc || fallback;
+  const rawWires = Array.isArray(base.wires)
+    ? base.wires
+    : Array.isArray(fallback.wires)
+    ? fallback.wires
+    : [];
+  const rawComponents = Array.isArray(base.components)
+    ? base.components
+    : Array.isArray(fallback.components)
+    ? fallback.components
+    : [];
+
+  const seenWireIds = new Set<string>();
+  const uniqueWires: Wire[] = [];
+  for (const w of rawWires) {
+    if (!w || !w.id) continue;
+    if (!seenWireIds.has(w.id)) {
+      seenWireIds.add(w.id);
+      uniqueWires.push(w);
+    } else {
+      const newId = `${w.id}_${Math.random().toString(36).slice(2, 6)}`;
+      seenWireIds.add(newId);
+      uniqueWires.push({ ...w, id: newId });
+    }
+  }
+
+  const seenCompIds = new Set<string>();
+  const uniqueComponents: SchematicComponent[] = [];
+  for (const c of rawComponents) {
+    if (!c || !c.id) continue;
+    if (!seenCompIds.has(c.id)) {
+      seenCompIds.add(c.id);
+      uniqueComponents.push(c);
+    } else {
+      const newId = `${c.id}_${Math.random().toString(36).slice(2, 6)}`;
+      seenCompIds.add(newId);
+      uniqueComponents.push({ ...c, id: newId });
+    }
+  }
+
+  return {
+    id: base.id || fallback.id || `doc_${Date.now()}`,
+    title: base.title || fallback.title || 'Circuit Schematic',
+    category: base.category || fallback.category || 'General',
+    summary: base.summary ?? fallback.summary ?? '',
+    explanation: base.explanation ?? fallback.explanation ?? '',
+    formula: base.formula ?? fallback.formula ?? '',
+    specifications: Array.isArray(base.specifications) ? base.specifications : fallback.specifications || [],
+    tips: Array.isArray(base.tips) ? base.tips : fallback.tips || [],
+    components: uniqueComponents,
+    wires: uniqueWires,
+    version: base.version || fallback.version || 1,
+    createdAt: base.createdAt || fallback.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
 
 export default function App() {
   // Main Schematic Document
-  const [doc, setDoc] = useState<SchematicDocument>(() => STARTER_CIRCUITS[0]);
+  const [doc, setDoc] = useState<SchematicDocument>(() => sanitizeDocument(STARTER_CIRCUITS[0]));
+  const safeDoc = useMemo(() => sanitizeDocument(doc), [doc]);
 
   // History stack for Undo / Redo
-  const [history, setHistory] = useState<SchematicDocument[]>([STARTER_CIRCUITS[0]]);
+  const [history, setHistory] = useState<SchematicDocument[]>([sanitizeDocument(STARTER_CIRCUITS[0])]);
   const [historyIndex, setHistoryIndex] = useState(0);
 
   // View & Tool States
@@ -56,9 +146,52 @@ export default function App() {
   const [isErcOpen, setIsErcOpen] = useState(false);
   const [isNetlistOpen, setIsNetlistOpen] = useState(false);
   const [isPrintPdfOpen, setIsPrintPdfOpen] = useState(false);
+  const [isUniversalModalOpen, setIsUniversalModalOpen] = useState(false);
+  const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
+  const [googleSearchQuery, setGoogleSearchQuery] = useState('');
+  const [isAllDataSheetModalOpen, setIsAllDataSheetModalOpen] = useState(false);
+  const [allDataSheetSearchQuery, setAllDataSheetSearchQuery] = useState('');
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
+  const [isGitHubModalOpen, setIsGitHubModalOpen] = useState(false);
   const [productSelectorComp, setProductSelectorComp] = useState<SchematicComponent | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showInfoBanner, setShowInfoBanner] = useState(true);
+
+  // User Authentication State
+  const [currentUser, setLocalCurrentUser] = useState<UserProfile | null>(() => getCurrentUser());
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup' | 'whatsapp_otp' | 'forgot_password'>('signin');
+
+  // Load custom/Google synthesized parts and listen to auth changes on startup
+  useEffect(() => {
+    loadUserSavedComponents();
+    const unsub = subscribeToAuthChanges((user) => {
+      setLocalCurrentUser(user);
+    });
+    return unsub;
+  }, []);
+
+  const handleOpenAuth = (mode: 'signin' | 'signup' | 'whatsapp_otp' | 'forgot_password' = 'signin') => {
+    setAuthModalMode(mode);
+    setIsAuthModalOpen(true);
+  };
+
+  const handleAuthSuccess = (user: UserProfile) => {
+    setLocalCurrentUser(user);
+    setIsAuthModalOpen(false);
+    setToastMessage(`Welcome, ${user.name}! ${user.isWhatsappVerified ? 'WhatsApp verified.' : ''}`);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setLocalCurrentUser(null);
+    setToastMessage('Signed out successfully.');
+  };
+
+  const handleSearchGoogle = (query: string) => {
+    setGoogleSearchQuery(query);
+    setIsGoogleModalOpen(true);
+  };
 
   // Real-Time Simulation State
   const [simulationState, setSimulationState] = useState<SimulationState>(() => ({
@@ -71,8 +204,86 @@ export default function App() {
     componentResults: {},
     probedNets: ['VCC', '+5V', 'OUT_555'],
     probedWaveforms: {},
+    activeScenarioId: 'scenario_nominal_5v',
+    activeScenarioName: 'Nominal 5.0V Baseline (25°C)',
+    operatingConditions: {
+      supplyVoltage: 5.0,
+      temperature: 25,
+      simSpeed: 1,
+      loadCondition: 'nominal',
+      tolerance: 0,
+      notes: 'Standard room-temperature lab benchmark with regulated 5.0V rail',
+    },
   }));
   const [isScopeOpen, setIsScopeOpen] = useState(false);
+
+  // Record document changes to Undo/Redo history (capped at 30 to protect memory)
+  const commitDocumentChange = useCallback((newDoc?: Partial<SchematicDocument> | null) => {
+    const cleanDoc = sanitizeDocument(newDoc);
+    setDoc(cleanDoc);
+    setHistory((prev) => {
+      const validIndex = Math.min(Math.max(0, historyIndex), prev.length - 1);
+      const sliced = prev.slice(0, validIndex + 1);
+      const updated = [...sliced, cleanDoc];
+      if (updated.length > 30) {
+        return updated.slice(updated.length - 30);
+      }
+      return updated;
+    });
+    setHistoryIndex((prev) => Math.min(29, prev + 1));
+  }, [historyIndex]);
+
+  // Apply a Simulation Scenario (loads saved probes, operating conditions & rails)
+  const handleApplyScenario = useCallback((scenario: SimulationScenario) => {
+    setSimulationState((prev) => ({
+      ...prev,
+      activeScenarioId: scenario.id,
+      activeScenarioName: scenario.name,
+      speed: scenario.operatingConditions.simSpeed || prev.speed,
+      probedNets: [...scenario.probedNets],
+      operatingConditions: { ...scenario.operatingConditions },
+    }));
+
+    // If scenario specifies component overrides (e.g. switch positions, source voltages), apply them to doc.components
+    if (scenario.componentOverrides && Object.keys(scenario.componentOverrides).length > 0) {
+      setDoc((prev) => {
+        const current = sanitizeDocument(prev);
+        return {
+          ...current,
+          components: current.components.map((c) => {
+            const override = scenario.componentOverrides?.[c.id];
+            if (!override) return c;
+            return {
+              ...c,
+              testSettings: {
+                ...(c.testSettings || {}),
+                ...override,
+              },
+            };
+          }),
+        };
+      });
+    }
+  }, []);
+
+  // Update live operating conditions (supply voltage, ambient temp, load condition)
+  const handleUpdateConditions = useCallback((conditions: Partial<OperatingConditions>, newProbes?: string[]) => {
+    setSimulationState((prev) => {
+      const currentCond = prev.operatingConditions || {
+        supplyVoltage: 5.0,
+        temperature: 25,
+        simSpeed: prev.speed,
+        loadCondition: 'nominal',
+      };
+      const updatedCond: OperatingConditions = { ...currentCond, ...conditions };
+      return {
+        ...prev,
+        speed: conditions.simSpeed !== undefined ? conditions.simSpeed : prev.speed,
+        probedNets: newProbes !== undefined ? newProbes : prev.probedNets,
+        operatingConditions: updatedCond,
+      };
+    });
+  }, []);
 
   // Real-Time Circuit Simulation Animation Loop (60 FPS)
   useEffect(() => {
@@ -86,7 +297,7 @@ export default function App() {
       lastTime = now;
 
       setSimulationState((prev) =>
-        stepCircuitSimulation(doc.components, doc.wires, prev, dt)
+        stepCircuitSimulation(safeDoc.components, safeDoc.wires, prev, dt)
       );
 
       animationFrameId = requestAnimationFrame(simLoop);
@@ -94,7 +305,7 @@ export default function App() {
 
     animationFrameId = requestAnimationFrame(simLoop);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [simulationState.isRunning, viewMode, doc.components, doc.wires]);
+  }, [simulationState.isRunning, viewMode, safeDoc.components, safeDoc.wires]);
 
   // Toggle Oscilloscope Probed Net
   const handleToggleProbeNet = useCallback((net: string) => {
@@ -115,7 +326,7 @@ export default function App() {
   // Quick switch toggle on canvas
   const handleToggleSwitch = useCallback((component: SchematicComponent) => {
     const isClosed = component.testSettings?.isClosed ?? true;
-    const nextComps = doc.components.map((c) =>
+    const nextComps = (safeDoc.components || []).map((c) =>
       c.id === component.id
         ? {
             ...c,
@@ -126,42 +337,366 @@ export default function App() {
           }
         : c
     );
-    setDoc((prev) => ({
-      ...prev,
+    commitDocumentChange({
+      ...safeDoc,
       components: nextComps,
       updatedAt: new Date().toISOString(),
-    }));
-  }, [doc.components]);
-
-  // Record document changes to Undo/Redo history
-  const commitDocumentChange = useCallback((newDoc: SchematicDocument) => {
-    setDoc(newDoc);
-    setHistory((prev) => {
-      const sliced = prev.slice(0, historyIndex + 1);
-      return [...sliced, newDoc];
     });
-    setHistoryIndex((prev) => prev + 1);
-  }, [historyIndex]);
+  }, [safeDoc, commitDocumentChange]);
+
+  // Update component settings (e.g. potentiometer slider, resistance, switch)
+  const handleUpdateComponentSettings = useCallback((componentId: string, settings: Partial<SchematicComponent['testSettings']>) => {
+    const nextComps = (safeDoc.components || []).map((c) =>
+      c.id === componentId
+        ? {
+            ...c,
+            testSettings: {
+              ...(c.testSettings || {}),
+              ...settings,
+            },
+          }
+        : c
+    );
+    commitDocumentChange({
+      ...safeDoc,
+      components: nextComps,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [safeDoc, commitDocumentChange]);
 
   const handleUndo = useCallback(() => {
     if (historyIndex > 0) {
       const nextIdx = historyIndex - 1;
-      setHistoryIndex(nextIdx);
-      setDoc(history[nextIdx]);
-      setSelectedCompIds([]);
-      setSelectedWireIds([]);
+      if (history[nextIdx]) {
+        setHistoryIndex(nextIdx);
+        setDoc(sanitizeDocument(history[nextIdx]));
+        setSelectedCompIds([]);
+        setSelectedWireIds([]);
+      }
     }
   }, [historyIndex, history]);
 
   const handleRedo = useCallback(() => {
     if (historyIndex < history.length - 1) {
       const nextIdx = historyIndex + 1;
-      setHistoryIndex(nextIdx);
-      setDoc(history[nextIdx]);
-      setSelectedCompIds([]);
-      setSelectedWireIds([]);
+      if (history[nextIdx]) {
+        setHistoryIndex(nextIdx);
+        setDoc(sanitizeDocument(history[nextIdx]));
+        setSelectedCompIds([]);
+        setSelectedWireIds([]);
+      }
     }
   }, [historyIndex, history]);
+
+  // Add a circuit directly from Google Search / Reference Hub into the schematic
+  const handleAddCircuitFromGoogle = useCallback(
+    (newComponents: SchematicComponent[], newWires: Wire[] = []) => {
+      if (!newComponents || newComponents.length === 0) return;
+
+      const currentComps = safeDoc.components || [];
+      const currentWires = safeDoc.wires || [];
+
+      // Find an offset so it doesn't directly overlap existing components
+      const maxX = currentComps.length > 0 
+        ? Math.max(...currentComps.map((c) => c.x)) + 160 
+        : 120;
+      const minY = newComponents.length > 0 ? Math.min(...newComponents.map((c) => c.y)) : 0;
+      const minX = newComponents.length > 0 ? Math.min(...newComponents.map((c) => c.x)) : 0;
+      
+      const offsetX = maxX - minX;
+      const offsetY = 100 - minY;
+
+      // Map ID collisions
+      const idMap = new Map<string, string>();
+      const placedComponents: SchematicComponent[] = newComponents.map((c) => {
+        const uniqueId = `comp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        idMap.set(c.id, uniqueId);
+        return {
+          ...c,
+          id: uniqueId,
+          x: Math.round((c.x + offsetX) / 10) * 10,
+          y: Math.round((c.y + offsetY) / 10) * 10,
+        };
+      });
+
+      const placedWires: Wire[] = (newWires || []).map((w) => {
+        return {
+          ...w,
+          id: `wire_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          startPin: w.startPin && idMap.has(w.startPin.componentId)
+            ? { ...w.startPin, componentId: idMap.get(w.startPin.componentId)! }
+            : w.startPin,
+          endPin: w.endPin && idMap.has(w.endPin.componentId)
+            ? { ...w.endPin, componentId: idMap.get(w.endPin.componentId)! }
+            : w.endPin,
+          points: (w.points || []).map((pt) => ({
+            x: Math.round((pt.x + offsetX) / 10) * 10,
+            y: Math.round((pt.y + offsetY) / 10) * 10,
+          })),
+        };
+      });
+
+      const updated = sanitizeDocument({
+        ...safeDoc,
+        components: [...currentComps, ...placedComponents],
+        wires: [...currentWires, ...placedWires],
+        updatedAt: new Date().toISOString(),
+      });
+
+      commitDocumentChange(updated);
+      setSelectedCompIds(placedComponents.map((c) => c.id));
+      setToastMessage(`Added circuit with ${placedComponents.length} components to schematic!`);
+    },
+    [safeDoc, commitDocumentChange]
+  );
+
+  // Open AllDataSheet Search Modal
+  const handleOpenAllDataSheetModal = useCallback((query: string = '') => {
+    setAllDataSheetSearchQuery(query);
+    setIsAllDataSheetModalOpen(true);
+  }, []);
+
+  // Apply component data from AllDataSheet into schematic: directly adds component to circuit diagram
+  const handleApplyAllDataSheetComponent = useCallback(
+    (part: AllDataSheetComponent) => {
+      // Determine reference designator prefix based on component category
+      let prefix = 'U';
+      const catLower = (part.category || '').toLowerCase();
+      if (catLower.includes('transistor') || catLower.includes('mosfet')) {
+        prefix = 'Q';
+      } else if (catLower.includes('diode')) {
+        prefix = 'D';
+      } else if (catLower.includes('resistor')) {
+        prefix = 'R';
+      } else if (catLower.includes('capacitor')) {
+        prefix = 'C';
+      } else if (catLower.includes('sensor')) {
+        prefix = 'S';
+      }
+
+      const currentComps = safeDoc.components || [];
+      const existingCount = currentComps.filter((c) => c.designator.startsWith(prefix)).length;
+      const nextDesignator = `${prefix}${existingCount + 1}`;
+
+      // Calculate placement coordinates near viewport center with collision avoidance
+      let placeX = Math.round((Math.max(120, -pan.x + 360)) / 10) * 10;
+      let placeY = Math.round((Math.max(120, -pan.y + 240)) / 10) * 10;
+
+      while (currentComps.some((c) => Math.abs(c.x - placeX) < 40 && Math.abs(c.y - placeY) < 40)) {
+        placeX += 50;
+        placeY += 40;
+      }
+
+      const symbolType = part.schematicSymbolType || 'ic_generic';
+      const compDef = getComponentDef(symbolType);
+
+      // Build pins array using exact pinout names from AllDataSheet
+      const initialPins = (part.pinout && part.pinout.length > 0)
+        ? part.pinout.map((p, idx) => ({
+            id: compDef.pins[idx]?.id || `pin_${p.pin}`,
+            name: p.name,
+          }))
+        : compDef.pins.map((p) => ({
+            id: p.id,
+            name: p.name,
+          }));
+
+      const resolvedImageUrl = part.imageUrl || getComponentRealImageUrl(part.partNumber, part.category, part.package);
+
+      const newComponent: SchematicComponent = {
+        id: `comp_ads_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        type: symbolType,
+        designator: nextDesignator,
+        value: part.partNumber,
+        footprint: part.package,
+        x: placeX,
+        y: placeY,
+        rotation: 0,
+        pins: initialPins,
+        imageUrl: resolvedImageUrl,
+        alldatasheetUrl: part.pdfUrl || part.alldatasheetUrl,
+        manufacturer: part.manufacturer,
+        partNumber: part.partNumber,
+        datasheetDescription: part.description,
+        datasheetSpecs: part.specs,
+        realPart: {
+          id: part.id,
+          manufacturer: part.manufacturer,
+          manufacturerPartNumber: part.partNumber,
+          category: part.category,
+          description: part.description,
+          packageFootprint: part.package,
+          datasheetUrl: part.pdfUrl || part.alldatasheetUrl,
+          approximatePriceUSD: 0.85,
+          inStock: true,
+          stockCount: 5000,
+          supplier: 'AllDataSheet Verified Part',
+          leadTimeDays: 2,
+          pinCount: part.pinCount,
+          specs: part.specs,
+          recommendedApplication: part.applicationNotes,
+        },
+      };
+
+      const updated = sanitizeDocument({
+        ...safeDoc,
+        components: [...currentComps, newComponent],
+        updatedAt: new Date().toISOString(),
+      });
+
+      commitDocumentChange(updated);
+      setSelectedCompIds([newComponent.id]);
+      setSelectedWireIds([]);
+      setActiveTool('select');
+      setToastMessage(`⚡ Added ${part.partNumber} (${part.manufacturer}) directly to circuit diagram!`);
+      setIsAllDataSheetModalOpen(false);
+    },
+    [safeDoc, pan, commitDocumentChange]
+  );
+
+  // Quick Insert Power & Earthing Reference Rails (+ / - / ⏚ PE)
+  const handleInsertPowerReferences = useCallback(() => {
+    const currentComps = safeDoc.components || [];
+    const currentWires = safeDoc.wires || [];
+
+    // Place near viewport center with 10px grid snap
+    const baseX = Math.round(Math.max(120, -pan.x + 300) / 10) * 10;
+    const baseY = Math.round(Math.max(140, -pan.y + 220) / 10) * 10;
+
+    const vSourceId = `vsource_${Date.now()}`;
+    const vPosId = `vpos_${Date.now()}`;
+    const vNegId = `vneg_${Date.now()}`;
+    const peId = `pe_${Date.now()}`;
+
+    const newComps: SchematicComponent[] = [
+      {
+        id: vSourceId,
+        type: 'dc_source',
+        designator: `V${currentComps.filter((c) => c.type === 'dc_source').length + 1}`,
+        value: '12V',
+        footprint: 'PWR-TB-2P_5.08',
+        x: baseX,
+        y: baseY + 80,
+        rotation: 0,
+        pins: [
+          { id: '1', name: '+', net: 'VCC' },
+          { id: '2', name: '-', net: 'GND' },
+        ],
+      },
+      {
+        id: vPosId,
+        type: 'source_pos_point',
+        designator: `V_POS${currentComps.filter((c) => c.type === 'source_pos_point').length + 1}`,
+        value: '+12V',
+        footprint: 'TESTPOINT_RED',
+        x: baseX + 180,
+        y: baseY,
+        rotation: 0,
+        pins: [{ id: '1', name: '+', net: 'VCC' }],
+      },
+      {
+        id: vNegId,
+        type: 'source_neg_point',
+        designator: `V_NEG${currentComps.filter((c) => c.type === 'source_neg_point').length + 1}`,
+        value: '-Ve (0V)',
+        footprint: 'TESTPOINT_BLK',
+        x: baseX + 180,
+        y: baseY + 180,
+        rotation: 0,
+        pins: [{ id: '1', name: '-', net: 'GND' }],
+      },
+      {
+        id: peId,
+        type: 'earth_ground',
+        designator: `PE${currentComps.filter((c) => c.type === 'earth_ground').length + 1}`,
+        value: 'EARTH (⏚)',
+        footprint: 'EARTH_CHASSIS_LUG',
+        x: baseX,
+        y: baseY + 180,
+        rotation: 0,
+        pins: [{ id: '1', name: 'EARTH', net: 'EARTH' }],
+      },
+    ];
+
+    const newWires: Wire[] = [
+      {
+        id: `wire_vpos_${Date.now()}`,
+        points: [
+          { x: baseX, y: baseY + 50 },
+          { x: baseX, y: baseY },
+          { x: baseX + 180, y: baseY },
+          { x: baseX + 180, y: baseY + 16 },
+        ],
+        net: 'VCC',
+        startPin: { componentId: vSourceId, pinId: '1' },
+        endPin: { componentId: vPosId, pinId: '1' },
+      },
+      {
+        id: `wire_vneg_${Date.now()}`,
+        points: [
+          { x: baseX, y: baseY + 110 },
+          { x: baseX, y: baseY + 150 },
+          { x: baseX + 180, y: baseY + 150 },
+          { x: baseX + 180, y: baseY + 164 },
+        ],
+        net: 'GND',
+        startPin: { componentId: vSourceId, pinId: '2' },
+        endPin: { componentId: vNegId, pinId: '1' },
+      },
+      {
+        id: `wire_pe_${Date.now()}`,
+        points: [
+          { x: baseX, y: baseY + 150 },
+          { x: baseX, y: baseY + 162 },
+        ],
+        net: 'EARTH',
+        startPin: { componentId: vSourceId, pinId: '2' },
+        endPin: { componentId: peId, pinId: '1' },
+      },
+    ];
+
+    const updated = sanitizeDocument({
+      ...safeDoc,
+      components: [...currentComps, ...newComps],
+      wires: [...currentWires, ...newWires],
+      updatedAt: new Date().toISOString(),
+    });
+
+    commitDocumentChange(updated);
+    setSelectedCompIds(newComps.map((c) => c.id));
+    setSelectedWireIds([]);
+    setActiveTool('select');
+    setToastMessage('⚡ Added DC Voltage Source (+ / -) & Earthing reference points to circuit!');
+  }, [safeDoc, pan, commitDocumentChange]);
+
+  // Circuit Rotation Handler (Rotates full circuit or selected subset, preserving wire connectivity)
+  const handleRotateCircuit = useCallback(
+    (direction: CircuitRotationDirection) => {
+      const isSubset = selectedCompIds.length > 0;
+      const result = rotateCircuit(
+        safeDoc.components || [],
+        safeDoc.wires || [],
+        direction,
+        isSubset ? selectedCompIds : undefined,
+        isSubset ? selectedWireIds : undefined
+      );
+
+      const updated = sanitizeDocument({
+        ...safeDoc,
+        components: result.components,
+        wires: result.wires,
+        updatedAt: new Date().toISOString(),
+      });
+
+      commitDocumentChange(updated);
+      setToastMessage(
+        isSubset
+          ? `Rotated ${selectedCompIds.length} selected component(s) (${direction})`
+          : `Rotated entire circuit (${direction})`
+      );
+    },
+    [safeDoc, selectedCompIds, selectedWireIds, commitDocumentChange]
+  );
 
   // Global Keyboard Shortcuts (Ctrl+Z, Ctrl+Y, W, S)
   useEffect(() => {
@@ -181,19 +716,41 @@ export default function App() {
         handleRedo();
       } else if (e.key === 'w' || e.key === 'W') {
         setActiveTool((prev) => (prev === 'wire' ? 'select' : 'wire'));
+      } else if (e.key === 'p' || e.key === 'P') {
+        setActiveTool((prev) => (prev === 'probe' ? 'select' : 'probe'));
       } else if (e.key === 's' || e.key === 'S') {
         setActiveTool('select');
+      } else if (e.key === 'h' || e.key === 'H') {
+        setActiveTool((prev) => (prev === 'pan' ? 'select' : 'pan'));
+      } else if (e.key === 'e' || e.key === 'E') {
+        setActiveTool((prev) => (prev === 'erase' ? 'select' : 'erase'));
+      } else if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault();
+        setIsShortcutsModalOpen((prev) => !prev);
+      } else if (e.key === ' ' && viewMode === 'schematic') {
+        e.preventDefault();
+        setSimulationState((prev) => ({ ...prev, isRunning: !prev.isRunning }));
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo]);
+  }, [handleUndo, handleRedo, viewMode]);
+
+  // Update Circuit callback (both components and wires atomically)
+  const handleUpdateCircuit = useCallback((newComps: SchematicComponent[], newWires: Wire[]) => {
+    commitDocumentChange({
+      ...safeDoc,
+      components: newComps,
+      wires: newWires,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [safeDoc, commitDocumentChange]);
 
   // Update Components callback
   const handleUpdateComponents = (newComps: SchematicComponent[]) => {
     commitDocumentChange({
-      ...doc,
+      ...safeDoc,
       components: newComps,
       updatedAt: new Date().toISOString(),
     });
@@ -202,7 +759,7 @@ export default function App() {
   // Update Wires callback
   const handleUpdateWires = (newWires: Wire[]) => {
     commitDocumentChange({
-      ...doc,
+      ...safeDoc,
       wires: newWires,
       updatedAt: new Date().toISOString(),
     });
@@ -211,7 +768,8 @@ export default function App() {
   // Rotate selected components
   const handleRotateSelected = () => {
     if (selectedCompIds.length === 0) return;
-    const updated = doc.components.map((c) => {
+    const currentComps = safeDoc.components || [];
+    const updated = currentComps.map((c) => {
       if (selectedCompIds.includes(c.id)) {
         const nextRot = ((c.rotation + 90) % 360) as 0 | 90 | 180 | 270;
         return { ...c, rotation: nextRot };
@@ -224,15 +782,17 @@ export default function App() {
   // Delete selected components / wires
   const handleDeleteSelected = () => {
     if (selectedCompIds.length === 0 && selectedWireIds.length === 0) return;
-    const newComps = doc.components.filter((c) => !selectedCompIds.includes(c.id));
-    const newWires = doc.wires.filter((w) => {
+    const currentComps = safeDoc.components || [];
+    const currentWires = safeDoc.wires || [];
+    const newComps = currentComps.filter((c) => !selectedCompIds.includes(c.id));
+    const newWires = currentWires.filter((w) => {
       if (selectedWireIds.includes(w.id)) return false;
       if (w.startPin && selectedCompIds.includes(w.startPin.componentId)) return false;
       if (w.endPin && selectedCompIds.includes(w.endPin.componentId)) return false;
       return true;
     });
     commitDocumentChange({
-      ...doc,
+      ...safeDoc,
       components: newComps,
       wires: newWires,
       updatedAt: new Date().toISOString(),
@@ -247,25 +807,27 @@ export default function App() {
     mode: 'replace' | 'append'
   ) => {
     if (mode === 'replace') {
-      commitDocumentChange(generated);
+      commitDocumentChange(sanitizeDocument(generated));
     } else {
       // Append mode: offset generated components to not overlap
       const offsetX = 350;
-      const offsetComps = generated.components.map((c) => ({
+      const genComps = Array.isArray(generated?.components) ? generated.components : [];
+      const genWires = Array.isArray(generated?.wires) ? generated.wires : [];
+      const offsetComps = genComps.map((c) => ({
         ...c,
         id: `ai_${c.id}_${Date.now()}`,
         x: c.x + offsetX,
       }));
-      const offsetWires = generated.wires.map((w) => ({
+      const offsetWires = genWires.map((w) => ({
         ...w,
         id: `ai_${w.id}_${Date.now()}`,
-        points: w.points.map((p) => ({ x: p.x + offsetX, y: p.y })),
+        points: (w.points || []).map((p) => ({ x: p.x + offsetX, y: p.y })),
       }));
 
       commitDocumentChange({
-        ...doc,
-        components: [...doc.components, ...offsetComps],
-        wires: [...doc.wires, ...offsetWires],
+        ...safeDoc,
+        components: [...(safeDoc.components || []), ...offsetComps],
+        wires: [...(safeDoc.wires || []), ...offsetWires],
         updatedAt: new Date().toISOString(),
       });
     }
@@ -293,11 +855,11 @@ export default function App() {
   // Export Gerber & Excellon Drill files in a ZIP archive
   const handleExportGerber = useCallback(async () => {
     try {
-      const zipBlob = await generateGerberZip(doc.components, doc.wires, doc.title);
+      const zipBlob = await generateGerberZip(safeDoc.components || [], safeDoc.wires || [], safeDoc.title);
       const url = URL.createObjectURL(zipBlob);
       const downloadAnchor = document.createElement('a');
       downloadAnchor.href = url;
-      downloadAnchor.download = `${doc.title.toLowerCase().replace(/\s+/g, '_')}_gerber_rs274x.zip`;
+      downloadAnchor.download = `${(safeDoc.title || 'circuit').toLowerCase().replace(/\s+/g, '_')}_gerber_rs274x.zip`;
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();
@@ -307,33 +869,32 @@ export default function App() {
       console.error('Gerber export error:', err);
       showToast('Failed to generate Gerber package.');
     }
-  }, [doc.components, doc.wires, doc.title, showToast]);
+  }, [safeDoc, showToast]);
 
   // Autoroute Schematic Net connections
   const handleAutoRoute = useCallback(() => {
-    const routeResult = autoRouteSchematicNets(doc.components, doc.wires);
-    const updatedWires = [...doc.wires, ...routeResult.newWires];
+    const routeResult = autoRouteSchematicNets(safeDoc.components || [], safeDoc.wires || []);
     commitDocumentChange({
-      ...doc,
+      ...safeDoc,
       components: routeResult.updatedComponents,
-      wires: updatedWires,
+      wires: routeResult.allWires,
       updatedAt: new Date().toISOString(),
     });
     showToast(
       routeResult.connectionsCount > 0
         ? `Auto-routed ${routeResult.connectionsCount} new wire connection${routeResult.connectionsCount > 1 ? 's' : ''}!`
-        : `All shared nets are already connected (${updatedWires.length} wires total).`
+        : `All shared nets are already connected (${routeResult.allWires.length} wires total).`
     );
-  }, [doc, commitDocumentChange, showToast]);
+  }, [safeDoc, commitDocumentChange, showToast]);
 
   // Sequentially renumber / annotate components
   const handleAnnotate = useCallback(() => {
     const { components: annotatedComps, wires: updatedWires, countUpdated } = reannotateComponents(
-      doc.components,
-      doc.wires
+      safeDoc.components || [],
+      safeDoc.wires || []
     );
     commitDocumentChange({
-      ...doc,
+      ...safeDoc,
       components: annotatedComps,
       wires: updatedWires,
       updatedAt: new Date().toISOString(),
@@ -341,16 +902,16 @@ export default function App() {
     showToast(
       `Components sequentially renumbered to standard IEEE designators (${countUpdated} parts updated).`
     );
-  }, [doc, commitDocumentChange, showToast]);
+  }, [safeDoc, commitDocumentChange, showToast]);
 
   // Export JSON file
   const handleExportJson = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(doc, null, 2));
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(safeDoc, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
     downloadAnchor.setAttribute(
       'download',
-      `${doc.title.toLowerCase().replace(/\s+/g, '_')}_schematic.json`
+      `${(safeDoc.title || 'circuit').toLowerCase().replace(/\s+/g, '_')}_schematic.json`
     );
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
@@ -358,10 +919,10 @@ export default function App() {
   };
 
   // Selected component objects
-  const selectedComponents = doc.components.filter((c) =>
+  const selectedComponents = (safeDoc.components || []).filter((c) =>
     selectedCompIds.includes(c.id)
   );
-  const selectedWires = doc.wires.filter((w) => selectedWireIds.includes(w.id));
+  const selectedWires = (safeDoc.wires || []).filter((w) => selectedWireIds.includes(w.id));
 
   return (
     <div className="flex flex-col w-screen h-screen bg-slate-950 text-slate-100 font-sans overflow-hidden">
@@ -376,6 +937,8 @@ export default function App() {
         onOpenErc={() => setIsErcOpen(true)}
         onOpenNetlist={() => setIsNetlistOpen(true)}
         onOpenPrintPdf={() => setIsPrintPdfOpen(true)}
+        onOpenUniversalModal={() => setIsUniversalModalOpen(true)}
+        onOpenGoogleModal={() => setIsGoogleModalOpen(true)}
         onExportGerber={handleExportGerber}
         onAutoRoute={handleAutoRoute}
         onAnnotate={handleAnnotate}
@@ -397,6 +960,11 @@ export default function App() {
         onChangeSimSpeed={(speed) =>
           setSimulationState((prev) => ({ ...prev, speed }))
         }
+        simulationState={simulationState}
+        components={safeDoc.components}
+        wires={safeDoc.wires}
+        onApplyScenario={handleApplyScenario}
+        onUpdateConditions={handleUpdateConditions}
         onLoadExample={(example) => {
           commitDocumentChange(example);
           setSelectedCompIds([]);
@@ -422,6 +990,14 @@ export default function App() {
         canRedo={historyIndex < history.length - 1}
         onUndo={handleUndo}
         onRedo={handleRedo}
+        currentUser={currentUser}
+        onOpenAuthModal={handleOpenAuth}
+        onLogout={handleLogout}
+        onSearchGoogle={handleSearchGoogle}
+        onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
+        onOpenAllDataSheetModal={() => handleOpenAllDataSheetModal()}
+        onInsertPowerReferences={handleInsertPowerReferences}
+        onOpenGitHubModal={() => setIsGitHubModalOpen(true)}
       />
 
       {/* Main Workspace Body */}
@@ -434,6 +1010,8 @@ export default function App() {
               if (def) setActiveTool('select');
             }}
             selectedDef={placingDef}
+            onOpenGoogleRefModal={() => setIsGoogleModalOpen(true)}
+            onOpenAllDataSheetModal={() => handleOpenAllDataSheetModal()}
           />
         )}
 
@@ -441,8 +1019,8 @@ export default function App() {
         <div className="flex-1 relative h-full">
           {viewMode === 'schematic' ? (
             <SchematicCanvas
-              components={doc.components}
-              wires={doc.wires}
+              components={safeDoc.components}
+              wires={safeDoc.wires}
               activeTool={activeTool}
               selectedComponentIds={selectedCompIds}
               selectedWireIds={selectedWireIds}
@@ -451,6 +1029,7 @@ export default function App() {
               pan={pan}
               onUpdateComponents={handleUpdateComponents}
               onUpdateWires={handleUpdateWires}
+              onUpdateCircuit={handleUpdateCircuit}
               onSelectComponents={setSelectedCompIds}
               onSelectWires={setSelectedWireIds}
               onFinishPlacingComponent={() => setPlacingDef(null)}
@@ -460,19 +1039,86 @@ export default function App() {
               isSimulating={simulationState.isRunning}
               onToggleProbeNet={handleToggleProbeNet}
               onToggleSwitch={handleToggleSwitch}
+              onToolChange={setActiveTool}
+              onOpenFullScope={() => setIsScopeOpen(true)}
+              onUpdateComponentSettings={handleUpdateComponentSettings}
             />
           ) : viewMode === 'pcb' ? (
-            <PcbCanvas components={doc.components} wires={doc.wires} />
+            <PcbCanvas
+              components={safeDoc.components}
+              wires={safeDoc.wires}
+              onUpdateComponentPlacement={(id, x, y, rotation) => {
+                const next = (safeDoc.components || []).map((c) =>
+                  c.id === id
+                    ? {
+                        ...c,
+                        pcbX: x,
+                        pcbY: y,
+                        pcbRotation: rotation !== undefined ? rotation : c.pcbRotation ?? 0,
+                      }
+                    : c
+                );
+                commitDocumentChange({
+                  ...safeDoc,
+                  components: next,
+                  updatedAt: new Date().toISOString(),
+                });
+              }}
+              onBatchUpdatePlacements={(updatedComponents) => {
+                commitDocumentChange({
+                  ...safeDoc,
+                  components: updatedComponents,
+                  updatedAt: new Date().toISOString(),
+                });
+              }}
+              onSelectComponent={(id) => {
+                setSelectedCompIds([id]);
+                setSelectedWireIds([]);
+              }}
+            />
+          ) : viewMode === 'panel' ? (
+            <IndustrialPanelDiagram
+              onLoadCircuitToCanvas={(circuitDoc) => {
+                commitDocumentChange({
+                  ...safeDoc,
+                  ...circuitDoc,
+                  id: `panel_circuit_${Date.now()}`,
+                  version: 1,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                });
+                setSelectedCompIds([]);
+                setSelectedWireIds([]);
+                setViewMode('schematic');
+              }}
+            />
           ) : (
             <Pcb3DViewer
-              components={doc.components}
-              wires={doc.wires}
-              projectName={doc.title}
+              components={safeDoc.components}
+              wires={safeDoc.wires}
+              projectName={safeDoc.title}
               onSelectComponent={(id) => {
                 setSelectedCompIds([id]);
                 setSelectedWireIds([]);
               }}
               onOpenProductSelector={(comp) => setProductSelectorComp(comp)}
+              onUpdateComponentPlacement={(id, x, y) => {
+                const next = (safeDoc.components || []).map((c) =>
+                  c.id === id ? { ...c, pcbX: x, pcbY: y } : c
+                );
+                commitDocumentChange({
+                  ...safeDoc,
+                  components: next,
+                  updatedAt: new Date().toISOString(),
+                });
+              }}
+              onBatchUpdatePlacements={(updatedComponents) => {
+                commitDocumentChange({
+                  ...safeDoc,
+                  components: updatedComponents,
+                  updatedAt: new Date().toISOString(),
+                });
+              }}
             />
           )}
 
@@ -488,12 +1134,12 @@ export default function App() {
           </div>
 
           {/* Top Info Banner about Current Circuit */}
-          {showInfoBanner && doc.summary && (
+          {showInfoBanner && safeDoc.summary && (
             <div className="absolute top-4 left-4 max-w-md bg-slate-900/90 backdrop-blur-xs border border-slate-800 p-3 rounded-lg shadow-xl text-xs z-10 transition-all">
               <div className="flex items-center justify-between font-semibold text-slate-200 mb-1">
                 <span className="flex items-center gap-1.5">
                   <Cpu className="w-3.5 h-3.5 text-sky-400" />
-                  {doc.title}
+                  {safeDoc.title}
                 </span>
                 <button
                   onClick={() => setShowInfoBanner(false)}
@@ -503,48 +1149,70 @@ export default function App() {
                 </button>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                {doc.summary}
+                {safeDoc.summary}
               </p>
-              {doc.formula && (
+              {safeDoc.formula && (
                 <div className="mt-1 text-[10px] text-amber-300 font-mono">
-                  {doc.formula}
+                  {safeDoc.formula}
                 </div>
               )}
             </div>
           )}
+
+          {/* Persistent Keyboard Shortcuts Footer Overlay */}
+          <KeyboardShortcutsOverlay
+            activeTool={activeTool}
+            onSelectTool={(tool) => setActiveTool(tool)}
+            onOpenModal={() => setIsShortcutsModalOpen(true)}
+            onRotateSelected={handleRotateSelected}
+            onDeleteSelected={handleDeleteSelected}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            canUndo={historyIndex > 0}
+            canRedo={historyIndex < history.length - 1}
+            isSimulating={simulationState.isRunning}
+            onToggleSimulation={() =>
+              setSimulationState((prev) => ({ ...prev, isRunning: !prev.isRunning }))
+            }
+            hasSelection={selectedCompIds.length > 0 || selectedWireIds.length > 0}
+          />
         </div>
 
         {/* Right Side: Properties & Inspector Panel */}
-        <PropertiesPanel
-          selectedComponents={selectedComponents}
-          selectedWires={selectedWires}
-          document={doc}
-          onUpdateComponent={(updated) => {
-            const next = doc.components.map((c) => (c.id === updated.id ? updated : c));
-            handleUpdateComponents(next);
-          }}
-          onDeleteSelected={handleDeleteSelected}
-          onUpdateDocumentMeta={(meta) => {
-            commitDocumentChange({
-              ...doc,
-              ...meta,
-              updatedAt: new Date().toISOString(),
-            });
-          }}
-          simulationResult={
-            selectedComponents.length === 1
-              ? simulationState.componentResults[selectedComponents[0].id]
-              : undefined
-          }
-          isSimulating={simulationState.isRunning}
-        />
+        {viewMode !== 'panel' && (
+          <PropertiesPanel
+            selectedComponents={selectedComponents}
+            selectedWires={selectedWires}
+            document={safeDoc}
+            onUpdateComponent={(updated) => {
+              const next = (safeDoc.components || []).map((c) => (c.id === updated.id ? updated : c));
+              handleUpdateComponents(next);
+            }}
+            onDeleteSelected={handleDeleteSelected}
+            onUpdateDocumentMeta={(meta) => {
+              commitDocumentChange({
+                ...safeDoc,
+                ...meta,
+                updatedAt: new Date().toISOString(),
+              });
+            }}
+            simulationResult={
+              selectedComponents.length === 1
+                ? simulationState.componentResults[selectedComponents[0].id]
+                : undefined
+            }
+            isSimulating={simulationState.isRunning}
+            onRotateCircuit={handleRotateCircuit}
+            onOpenAllDataSheetModal={handleOpenAllDataSheetModal}
+          />
+        )}
       </div>
 
       {/* VIRTUAL OSCILLOSCOPE & SIGNAL ANALYZER */}
       <OscilloscopePanel
         simulationState={simulationState}
-        components={doc.components}
-        wires={doc.wires}
+        components={safeDoc.components}
+        wires={safeDoc.wires}
         isOpen={isScopeOpen}
         onClose={() => setIsScopeOpen(false)}
         onToggleProbeNet={handleToggleProbeNet}
@@ -555,21 +1223,21 @@ export default function App() {
         isOpen={isAiModalOpen}
         onClose={() => setIsAiModalOpen(false)}
         onApplyCircuit={handleApplyAiCircuit}
-        currentCircuit={doc}
+        currentCircuit={safeDoc}
       />
 
       <BomPanel
         isOpen={isBomOpen}
         onClose={() => setIsBomOpen(false)}
-        components={doc.components}
-        circuitTitle={doc.title}
+        components={safeDoc.components}
+        circuitTitle={safeDoc.title}
       />
 
       <ErcPanel
         isOpen={isErcOpen}
         onClose={() => setIsErcOpen(false)}
-        components={doc.components}
-        wires={doc.wires}
+        components={safeDoc.components}
+        wires={safeDoc.wires}
         onSelectComponent={(id) => {
           setSelectedCompIds([id]);
           setSelectedWireIds([]);
@@ -579,16 +1247,51 @@ export default function App() {
       <NetlistPanel
         isOpen={isNetlistOpen}
         onClose={() => setIsNetlistOpen(false)}
-        components={doc.components}
-        wires={doc.wires}
-        circuitTitle={doc.title}
+        components={safeDoc.components}
+        wires={safeDoc.wires}
+        circuitTitle={safeDoc.title}
       />
 
       {/* Print PDF / Schematic SVG Export Modal */}
       <PrintPdfModal
         isOpen={isPrintPdfOpen}
         onClose={() => setIsPrintPdfOpen(false)}
-        document={doc}
+        document={safeDoc}
+      />
+
+      {/* Universal Manufacturing & File Hub (BOM, Gerber, 3D OBJ, PDF, DOC & File Import) */}
+      <UniversalFileModal
+        isOpen={isUniversalModalOpen}
+        onClose={() => setIsUniversalModalOpen(false)}
+        document={safeDoc}
+        onImportProject={(importedDoc) => {
+          commitDocumentChange(sanitizeDocument(importedDoc));
+          setSelectedCompIds([]);
+          setSelectedWireIds([]);
+          setToastMessage(`Imported project: ${importedDoc.title}`);
+        }}
+        onOpenGitHubModal={() => setIsGitHubModalOpen(true)}
+      />
+
+      {/* Google Reference & Custom Component Synthesizer */}
+      <GoogleReferenceModal
+        isOpen={isGoogleModalOpen}
+        onClose={() => setIsGoogleModalOpen(false)}
+        initialSearchQuery={googleSearchQuery}
+        onSelectComponentToPlace={(def) => {
+          setPlacingDef(def);
+          setActiveTool('select');
+          setToastMessage(`Selected "${def.name}". Click on schematic canvas to place.`);
+        }}
+        onAddCircuitToCanvas={handleAddCircuitFromGoogle}
+      />
+
+      {/* User Authentication & WhatsApp OTP Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onSuccess={handleAuthSuccess}
+        initialMode={authModalMode}
       />
 
       {/* Real Hardware Product Selector Modal (from 3D view or Inspector) */}
@@ -598,7 +1301,7 @@ export default function App() {
           onClose={() => setProductSelectorComp(null)}
           component={productSelectorComp}
           onSelectProduct={(part) => {
-            const next = doc.components.map((c) =>
+            const next = (safeDoc.components || []).map((c) =>
               c.id === productSelectorComp.id
                 ? {
                     ...c,
@@ -608,7 +1311,7 @@ export default function App() {
                 : c
             );
             commitDocumentChange({
-              ...doc,
+              ...safeDoc,
               components: next,
               updatedAt: new Date().toISOString(),
             });
@@ -617,6 +1320,34 @@ export default function App() {
           }}
         />
       )}
+
+      {/* AllDataSheet.com Component Search, Pinout & Specs Modal */}
+      <AllDataSheetModal
+        isOpen={isAllDataSheetModalOpen}
+        onClose={() => setIsAllDataSheetModalOpen(false)}
+        onSelectComponent={handleApplyAllDataSheetComponent}
+        initialQuery={allDataSheetSearchQuery}
+      />
+
+      {/* Keyboard Shortcuts Reference Modal */}
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={() => setIsShortcutsModalOpen(false)}
+        onSelectTool={(tool) => {
+          setActiveTool(tool);
+          setIsShortcutsModalOpen(false);
+        }}
+      />
+
+      {/* GitHub Repository Deployment, Live URL & User Sign-Up Modal */}
+      <GitHubDeployModal
+        isOpen={isGitHubModalOpen}
+        onClose={() => setIsGitHubModalOpen(false)}
+        onOpenAuthModal={(mode) => {
+          setIsGitHubModalOpen(false);
+          handleOpenAuth(mode);
+        }}
+      />
 
       {/* Floating Status Toast Notification */}
       {toastMessage && (

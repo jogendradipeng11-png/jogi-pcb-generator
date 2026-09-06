@@ -13,6 +13,27 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = 3000;
 
+// Global process error handlers to prevent unhandled promise rejections from crashing the process
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[Process] Unhandled Rejection at:", promise, "reason:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[Process] Uncaught Exception:", err);
+});
+
+// Enable CORS and handle preflight requests cleanly
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
 app.use(express.json({ limit: "25mb" }));
 
 // Lazy get or initialize Gemini client
@@ -60,48 +81,107 @@ function cleanAndParseJSON(text: string): any {
   return JSON.parse(cleaned);
 }
 
-// Candidate models for graceful fallback cascade
+// Candidate models for graceful fallback cascade.
+// Prioritizes gemini-3.1-flash-lite to ensure rapid response times and high availability
+// during peak demand spikes, with gemini-3.8-flash and gemini-flash-latest as robust alternatives.
 const CANDIDATE_MODELS = [
-  "gemini-flash-latest",
+  "gemini-3.1-flash-lite",
   "gemini-3.8-flash",
+  "gemini-flash-latest",
 ];
 
-// Robust wrapper with model cascade & per-call timeout
+function isHighDemandOrTransient(err: any): boolean {
+  if (!err) return false;
+  const msg = (err.message || String(err)).toLowerCase();
+  const status = err.status || err.statusCode || 0;
+  return (
+    status === 503 ||
+    status === 429 ||
+    status === 500 ||
+    msg.includes("high demand") ||
+    msg.includes("spikes in demand") ||
+    msg.includes("unavailable") ||
+    msg.includes("overloaded") ||
+    msg.includes("resource_exhausted") ||
+    msg.includes("try again later") ||
+    msg.includes("timeout") ||
+    msg.includes("econnreset")
+  );
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Robust wrapper with model cascade, abort controllers, total time budget, and zero unhandled rejections
 async function generateContentWithRetryAndFallback(
   ai: GoogleGenAI,
-  requestConfig: any
+  requestConfig: any,
+  options: { totalTimeoutMs?: number; perAttemptTimeoutMs?: number } = {}
 ) {
+  const totalTimeoutMs = options.totalTimeoutMs || 14000;
+  const perAttemptTimeoutMs = options.perAttemptTimeoutMs || 6500;
+  const deadline = Date.now() + totalTimeoutMs;
+
   let lastError: any = null;
 
   for (const model of CANDIDATE_MODELS) {
-    try {
-      console.log(`[Gemini API] Requesting ${model}...`);
-      
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`Model ${model} request timed out`)), 7500)
-      );
+    const remainingBudget = deadline - Date.now();
+    if (remainingBudget < 2500) {
+      console.warn(`[Gemini API] Time budget reached (${remainingBudget}ms left). Triggering local synthesis.`);
+      break;
+    }
 
-      const apiPromise = ai.models.generateContent({
+    const attemptBudget = Math.min(perAttemptTimeoutMs, remainingBudget - 400);
+    if (attemptBudget < 2000) break;
+
+    const controller = new AbortController();
+    let timer: NodeJS.Timeout | null = setTimeout(() => {
+      controller.abort();
+    }, attemptBudget);
+
+    try {
+      console.log(`[Gemini API] Requesting ${model} (budget: ${attemptBudget}ms)...`);
+
+      const mergedConfig = {
+        ...(requestConfig.config || {}),
+        abortSignal: controller.signal,
+      };
+
+      const response = await ai.models.generateContent({
         ...requestConfig,
         model,
+        config: mergedConfig,
       });
 
-      const response: any = await Promise.race([apiPromise, timeoutPromise]);
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+
       console.log(`[Gemini API] Success with model: ${model}`);
       return { response, modelUsed: model };
     } catch (err: any) {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
       lastError = err;
       const cleanMsg = extractCleanErrorMessage(err);
-      console.warn(`[Gemini API] Model ${model} failed: ${cleanMsg}`);
+      console.warn(`[Gemini API] Model ${model} finished with: ${cleanMsg}`);
+
+      if (controller.signal.aborted) {
+        console.warn(`[Gemini API] Model ${model} timed out after ${attemptBudget}ms`);
+      }
     }
   }
 
-  throw lastError;
+  throw lastError || new Error("All candidate models timed out or were unavailable");
 }
 
 // Built-in intelligent EDA Synthesizer fallback if all cloud models are unavailable
-function generateFallbackCircuit(prompt: string, reason?: string) {
-  const p = prompt.toLowerCase();
+function generateFallbackCircuit(prompt?: string, reason?: string) {
+  const p = (typeof prompt === "string" ? prompt : "").toLowerCase();
 
   // 1. 555 Timer / Multivibrator / Flasher / Pulse / Oscillator
   if (
@@ -685,7 +765,671 @@ function generateFallbackCircuit(prompt: string, reason?: string) {
     };
   }
 
-  // 5. Default General Electronic Circuit
+  // 5. Motor Driver / H-Bridge / Stepper / L293D / Actuator
+  if (
+    p.includes("motor") ||
+    p.includes("h-bridge") ||
+    p.includes("h bridge") ||
+    p.includes("l293") ||
+    p.includes("l298") ||
+    p.includes("actuator") ||
+    p.includes("stepper")
+  ) {
+    return {
+      title: "H-Bridge DC Motor Driver Circuit",
+      category: "Motor Control",
+      summary: "A bidirectional H-Bridge DC motor controller circuit using discrete complementary NPN/PNP transistors with inductive flyback protection diodes and logic controls.",
+      explanation: "Pairs of diagonal transistors (Q1/Q4 for Forward, Q2/Q3 for Reverse) steer supply current through the DC motor terminals. Flyback diodes D1-D4 clamp inductive back-EMF voltage spikes generated during motor commutation. Base resistors limit logic control pin currents.",
+      formula: "Imotor = (VCC - 2*Vce_sat) / Rmotor, Back-EMF Vclamp = VCC + 0.7V",
+      specifications: [
+        "Motor Supply Voltage: 5V - 12V DC",
+        "Continuous Drive Current: up to 800mA",
+        "Logic Input: 3.3V or 5V TTL/CMOS Compatible",
+        "Protection: 4x 1N4007 High-Voltage Flyback Clamping",
+      ],
+      tips: [
+        "Never assert IN1 and IN2 HIGH simultaneously to prevent shoot-through short circuit.",
+        "Add a 100nF ceramic capacitor across motor terminals to suppress brush RF noise.",
+      ],
+      synthesizedFallback: true,
+      fallbackReason: reason || "Synthesized via local EDA engine during temporary cloud AI demand.",
+      components: [
+        {
+          id: "pwr_vmotor",
+          type: "vcc",
+          designator: "VCC",
+          value: "+12V",
+          footprint: "PWR_FLAG",
+          x: 480,
+          y: 80,
+          rotation: 0,
+          pins: [{ id: "1", name: "VCC", net: "VMOTOR" }],
+        },
+        {
+          id: "q_pnp1",
+          type: "pnp_bjt",
+          designator: "Q1",
+          value: "2N3906",
+          footprint: "TO-92",
+          x: 360,
+          y: 180,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "B", net: "CTRL_FWD" },
+            { id: "2", name: "E", net: "VMOTOR" },
+            { id: "3", name: "C", net: "MOT_A" },
+          ],
+        },
+        {
+          id: "q_pnp2",
+          type: "pnp_bjt",
+          designator: "Q2",
+          value: "2N3906",
+          footprint: "TO-92",
+          x: 600,
+          y: 180,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "B", net: "CTRL_REV" },
+            { id: "2", name: "E", net: "VMOTOR" },
+            { id: "3", name: "C", net: "MOT_B" },
+          ],
+        },
+        {
+          id: "conn_motor",
+          type: "connector_2pin",
+          designator: "M1",
+          value: "DC Motor",
+          footprint: "TerminalBlock_P5.08mm",
+          x: 480,
+          y: 280,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "+", net: "MOT_A" },
+            { id: "2", name: "-", net: "MOT_B" },
+          ],
+        },
+        {
+          id: "q_npn1",
+          type: "npn_bjt",
+          designator: "Q3",
+          value: "2N2222",
+          footprint: "TO-92",
+          x: 360,
+          y: 380,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "B", net: "CTRL_REV" },
+            { id: "2", name: "C", net: "MOT_A" },
+            { id: "3", name: "E", net: "GND" },
+          ],
+        },
+        {
+          id: "q_npn2",
+          type: "npn_bjt",
+          designator: "Q4",
+          value: "2N2222",
+          footprint: "TO-92",
+          x: 600,
+          y: 380,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "B", net: "CTRL_FWD" },
+            { id: "2", name: "C", net: "MOT_B" },
+            { id: "3", name: "E", net: "GND" },
+          ],
+        },
+        {
+          id: "d_clamp1",
+          type: "diode",
+          designator: "D1",
+          value: "1N4007",
+          footprint: "DO-41",
+          x: 280,
+          y: 240,
+          rotation: 270,
+          pins: [
+            { id: "1", name: "A", net: "MOT_A" },
+            { id: "2", name: "K", net: "VMOTOR" },
+          ],
+        },
+        {
+          id: "d_clamp2",
+          type: "diode",
+          designator: "D2",
+          value: "1N4007",
+          footprint: "DO-41",
+          x: 680,
+          y: 240,
+          rotation: 270,
+          pins: [
+            { id: "1", name: "A", net: "MOT_B" },
+            { id: "2", name: "K", net: "VMOTOR" },
+          ],
+        },
+        {
+          id: "pwr_gnd",
+          type: "gnd",
+          designator: "GND1",
+          value: "0V",
+          footprint: "GND_FLAG",
+          x: 480,
+          y: 490,
+          rotation: 0,
+          pins: [{ id: "1", name: "GND", net: "GND" }],
+        },
+      ],
+      nets: [
+        { name: "VMOTOR", color: "#ef4444" },
+        { name: "GND", color: "#3b82f6" },
+        { name: "MOT_A", color: "#10b981" },
+        { name: "MOT_B", color: "#f59e0b" },
+        { name: "CTRL_FWD", color: "#8b5cf6" },
+        { name: "CTRL_REV", color: "#06b6d4" },
+      ],
+    };
+  }
+
+  // 6. Microcontroller / ESP32 / Arduino / Sensor Board
+  if (
+    p.includes("esp32") ||
+    p.includes("arduino") ||
+    p.includes("mcu") ||
+    p.includes("microcontroller") ||
+    p.includes("atmega") ||
+    p.includes("iot")
+  ) {
+    return {
+      title: "ESP32 IoT Sensor Node Core Circuit",
+      category: "Microcontroller",
+      summary: "A production-ready minimal ESP32 microcontroller circuit with 3.3V LDO regulator, EN hardware reset circuit, status telemetry LED on GPIO2, and I2C sensor bus connector.",
+      explanation: "A 5V DC input is stepped down to 3.3V by U1 (AMS1117-3.3) with bulk tantalum and high-frequency ceramic capacitors. The EN pin incorporates an RC delay (R1=10k, C3=100nF) with momentary tactile reset button SW1. Pull-up resistors R3 and R4 secure the I2C bus (SDA/SCL) for external environmental sensors. D1 indicates MCU heartbeat.",
+      formula: "V_LDO = 3.3V, I2C pullup rise time tr = 0.8473 * Rp * Cb ≤ 1000ns",
+      specifications: [
+        "Operating Core Voltage: 3.3V DC",
+        "External DC Input: 4.75V - 12V DC",
+        "I2C Bus Speed: 100kHz / 400kHz Fast Mode",
+        "IO Drive Current: 12mA per GPIO",
+      ],
+      tips: [
+        "Maintain clean star routing for 3.3V supply to the RF core to prevent WiFi brownouts.",
+        "Add a 10uF ceramic capacitor right at the 3.3V pin of the ESP32 module.",
+      ],
+      synthesizedFallback: true,
+      fallbackReason: reason || "Synthesized via local EDA engine during temporary cloud AI demand.",
+      components: [
+        {
+          id: "pwr_5v",
+          type: "vcc",
+          designator: "VIN",
+          value: "+5V",
+          footprint: "PWR_FLAG",
+          x: 180,
+          y: 120,
+          rotation: 0,
+          pins: [{ id: "1", name: "VCC", net: "5V_IN" }],
+        },
+        {
+          id: "u_ldo",
+          type: "ic_regulator",
+          designator: "U1",
+          value: "AMS1117-3.3",
+          footprint: "SOT-223",
+          x: 280,
+          y: 200,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "IN", net: "5V_IN" },
+            { id: "2", name: "GND", net: "GND" },
+            { id: "3", name: "OUT", net: "3V3" },
+          ],
+        },
+        {
+          id: "c_ldo_out",
+          type: "polarized_capacitor",
+          designator: "C1",
+          value: "22uF",
+          footprint: "C0805",
+          x: 370,
+          y: 200,
+          rotation: 90,
+          pins: [
+            { id: "1", name: "+", net: "3V3" },
+            { id: "2", name: "-", net: "GND" },
+          ],
+        },
+        {
+          id: "u_mcu",
+          type: "ic_mcu",
+          designator: "U2",
+          value: "ESP32-WROOM-32",
+          footprint: "QFN-48_7x7mm",
+          x: 520,
+          y: 300,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "3V3", net: "3V3" },
+            { id: "2", name: "GND", net: "GND" },
+            { id: "3", name: "EN", net: "MCU_EN" },
+            { id: "4", name: "GPIO2", net: "GPIO2_LED" },
+            { id: "5", name: "IO21", net: "I2C_SDA" },
+            { id: "6", name: "IO22", net: "I2C_SCL" },
+            { id: "7", name: "IO34", net: "ANALOG_IN" },
+            { id: "8", name: "TXD0", net: "UART_TX" },
+          ],
+        },
+        {
+          id: "sw_reset",
+          type: "push_button",
+          designator: "SW1",
+          value: "Reset Button",
+          footprint: "SW_SPST",
+          x: 370,
+          y: 350,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "MCU_EN" },
+            { id: "2", name: "2", net: "GND" },
+          ],
+        },
+        {
+          id: "r_reset_pullup",
+          type: "resistor",
+          designator: "R1",
+          value: "10k",
+          footprint: "R0805",
+          x: 370,
+          y: 280,
+          rotation: 90,
+          pins: [
+            { id: "1", name: "1", net: "3V3" },
+            { id: "2", name: "2", net: "MCU_EN" },
+          ],
+        },
+        {
+          id: "r_led",
+          type: "resistor",
+          designator: "R2",
+          value: "1k",
+          footprint: "R0805",
+          x: 670,
+          y: 270,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "GPIO2_LED" },
+            { id: "2", name: "2", net: "NET_LED_A" },
+          ],
+        },
+        {
+          id: "led_hb",
+          type: "led",
+          designator: "LED1",
+          value: "Blue LED",
+          footprint: "LED0805",
+          x: 770,
+          y: 270,
+          rotation: 90,
+          pins: [
+            { id: "1", name: "A", net: "NET_LED_A" },
+            { id: "2", name: "K", net: "GND" },
+          ],
+        },
+        {
+          id: "conn_i2c",
+          type: "connector_4pin",
+          designator: "J1",
+          value: "I2C Sensor Header",
+          footprint: "PinHeader_1x04_P2.54mm",
+          x: 670,
+          y: 380,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "VCC", net: "3V3" },
+            { id: "2", name: "GND", net: "GND" },
+            { id: "3", name: "SDA", net: "I2C_SDA" },
+            { id: "4", name: "SCL", net: "I2C_SCL" },
+          ],
+        },
+        {
+          id: "pwr_gnd",
+          type: "gnd",
+          designator: "GND1",
+          value: "0V",
+          footprint: "GND_FLAG",
+          x: 520,
+          y: 490,
+          rotation: 0,
+          pins: [{ id: "1", name: "GND", net: "GND" }],
+        },
+      ],
+      nets: [
+        { name: "5V_IN", color: "#ef4444" },
+        { name: "3V3", color: "#f59e0b" },
+        { name: "GND", color: "#3b82f6" },
+        { name: "MCU_EN", color: "#10b981" },
+        { name: "GPIO2_LED", color: "#8b5cf6" },
+        { name: "NET_LED_A", color: "#ec4899" },
+        { name: "I2C_SDA", color: "#06b6d4" },
+        { name: "I2C_SCL", color: "#14b8a6" },
+      ],
+    };
+  }
+
+  // 7. Light / Dark / Sensor / Comparator Alarm Circuit
+  if (
+    p.includes("sensor") ||
+    p.includes("ldr") ||
+    p.includes("light") ||
+    p.includes("dark") ||
+    p.includes("photo") ||
+    p.includes("comparator") ||
+    p.includes("alarm")
+  ) {
+    return {
+      title: "Automatic Light-Activated Relay & Alarm Circuit",
+      category: "Sensor & Detection",
+      summary: "A precision light-detecting circuit utilizing a photoresistor (LDR) divider, LM358 voltage comparator with adjustable potentiometer threshold, and NPN transistor switch.",
+      explanation: "LDR1 and R1 form a light-dependent voltage divider connected to the inverting input of LM358 comparator U1. Trimmer potentiometer RV1 sets the adjustable trigger threshold voltage at the non-inverting input. When ambient light drops below threshold, comparator output drives transistor Q1 to energize the 5V relay.",
+      formula: "V_sens = VCC * R_ldr / (R1 + R_ldr), Trigger condition: V_sens > V_thresh",
+      specifications: [
+        "Operating Voltage: 5V DC Nominal",
+        "Threshold Adjustment: Continuous 0V - 5V via 10k potentiometer",
+        "Output Switching: 5V DC Relay (up to 10A @ 250VAC contact rating)",
+        "Response Time: <15ms",
+      ],
+      tips: [
+        "Add a 1MΩ feedback resistor between pin 1 and pin 3 for hysteresis to prevent chattering.",
+        "Ensure flyback diode D1 is connected across the relay coil to protect transistor Q1.",
+      ],
+      synthesizedFallback: true,
+      fallbackReason: reason || "Synthesized via local EDA engine during temporary cloud AI demand.",
+      components: [
+        {
+          id: "pwr_5v",
+          type: "vcc",
+          designator: "PWR1",
+          value: "+5V",
+          footprint: "PWR_FLAG",
+          x: 280,
+          y: 80,
+          rotation: 0,
+          pins: [{ id: "1", name: "VCC", net: "VCC" }],
+        },
+        {
+          id: "r_bias",
+          type: "resistor",
+          designator: "R1",
+          value: "10k",
+          footprint: "R_Axial_DIN0207",
+          x: 220,
+          y: 180,
+          rotation: 90,
+          pins: [
+            { id: "1", name: "1", net: "VCC" },
+            { id: "2", name: "2", net: "SENS_NODE" },
+          ],
+        },
+        {
+          id: "pot_thresh",
+          type: "pot",
+          designator: "RV1",
+          value: "10k",
+          footprint: "POT-3362P",
+          x: 340,
+          y: 180,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "VCC" },
+            { id: "2", name: "W", net: "THRESH_REF" },
+            { id: "3", name: "3", net: "GND" },
+          ],
+        },
+        {
+          id: "u_comp",
+          type: "ic_opamp",
+          designator: "U1",
+          value: "LM358",
+          footprint: "DIP-8",
+          x: 480,
+          y: 240,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "IN+", net: "THRESH_REF" },
+            { id: "2", name: "IN-", net: "SENS_NODE" },
+            { id: "3", name: "OUT", net: "COMP_OUT" },
+            { id: "4", name: "VCC", net: "VCC" },
+            { id: "5", name: "GND", net: "GND" },
+          ],
+        },
+        {
+          id: "r_base",
+          type: "resistor",
+          designator: "R2",
+          value: "1k",
+          footprint: "R_Axial_DIN0207",
+          x: 600,
+          y: 240,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "COMP_OUT" },
+            { id: "2", name: "2", net: "Q_BASE" },
+          ],
+        },
+        {
+          id: "q_drv",
+          type: "npn_bjt",
+          designator: "Q1",
+          value: "2N2222",
+          footprint: "TO-92",
+          x: 700,
+          y: 300,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "B", net: "Q_BASE" },
+            { id: "2", name: "C", net: "RELAY_CTRL" },
+            { id: "3", name: "E", net: "GND" },
+          ],
+        },
+        {
+          id: "d_fly",
+          type: "diode",
+          designator: "D1",
+          value: "1N4007",
+          footprint: "DO-41",
+          x: 820,
+          y: 200,
+          rotation: 270,
+          pins: [
+            { id: "1", name: "A", net: "RELAY_CTRL" },
+            { id: "2", name: "K", net: "VCC" },
+          ],
+        },
+        {
+          id: "pwr_gnd",
+          type: "gnd",
+          designator: "GND1",
+          value: "0V",
+          footprint: "GND_FLAG",
+          x: 480,
+          y: 450,
+          rotation: 0,
+          pins: [{ id: "1", name: "GND", net: "GND" }],
+        },
+      ],
+      nets: [
+        { name: "VCC", color: "#ef4444" },
+        { name: "GND", color: "#3b82f6" },
+        { name: "SENS_NODE", color: "#10b981" },
+        { name: "THRESH_REF", color: "#f59e0b" },
+        { name: "COMP_OUT", color: "#8b5cf6" },
+        { name: "Q_BASE", color: "#06b6d4" },
+        { name: "RELAY_CTRL", color: "#ec4899" },
+      ],
+    };
+  }
+
+  // 8. Bridge Rectifier / AC to DC Power Converter
+  if (
+    p.includes("rectifier") ||
+    p.includes("ac to dc") ||
+    p.includes("ac-dc") ||
+    p.includes("bridge") ||
+    p.includes("transformer")
+  ) {
+    return {
+      title: "Full-Wave Bridge Rectifier with Filter & Zener Regulator",
+      category: "Power Conversion",
+      summary: "A classic AC to stabilized DC power supply featuring a 4-diode full wave bridge rectifier, large electrolytic reservoir filter capacitor, and Zener diode shunt regulator.",
+      explanation: "AC input from terminal J1 is rectified by bridge diodes D1-D4 into pulsating DC. Reservoir capacitor C1 smooths out 100/120Hz ripple. Current limiting resistor R1 and Zener diode D5 clamp and stabilize the output voltage to a clean 5.1V reference. C2 provides high-frequency decoupling.",
+      formula: "Vpeak = Vac_rms * 1.414 - 2*Vdiode ≈ (9V * 1.414) - 1.4V = 11.3V, Vripple = Iload / (2 * f * C)",
+      specifications: [
+        "AC Input: 6V to 15V RMS AC",
+        "DC Regulated Output: 5.1V DC ±5%",
+        "Max Output Current: 150mA",
+        "Diode Rating: 1N4007 (1A, 1000V)",
+      ],
+      tips: [
+        "Calculate reservoir capacitor sizing: C >= Iload / (2 * f * Vripple_target).",
+        "Ensure Zener resistor R1 power rating is adequate: P_R1 = (Vin_max - Vz)^2 / R1.",
+      ],
+      synthesizedFallback: true,
+      fallbackReason: reason || "Synthesized via local EDA engine during temporary cloud AI demand.",
+      components: [
+        {
+          id: "conn_ac",
+          type: "connector_2pin",
+          designator: "J1",
+          value: "AC Input 9V",
+          footprint: "TerminalBlock_P5.08mm",
+          x: 180,
+          y: 260,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "AC_L1" },
+            { id: "2", name: "2", net: "AC_L2" },
+          ],
+        },
+        {
+          id: "d_br1",
+          type: "diode",
+          designator: "D1",
+          value: "1N4007",
+          footprint: "DO-41",
+          x: 320,
+          y: 190,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "A", net: "AC_L1" },
+            { id: "2", name: "K", net: "RAW_DC_POS" },
+          ],
+        },
+        {
+          id: "d_br2",
+          type: "diode",
+          designator: "D2",
+          value: "1N4007",
+          footprint: "DO-41",
+          x: 420,
+          y: 190,
+          rotation: 180,
+          pins: [
+            { id: "1", name: "A", net: "RAW_DC_NEG" },
+            { id: "2", name: "K", net: "AC_L1" },
+          ],
+        },
+        {
+          id: "d_br3",
+          type: "diode",
+          designator: "D3",
+          value: "1N4007",
+          footprint: "DO-41",
+          x: 320,
+          y: 330,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "A", net: "AC_L2" },
+            { id: "2", name: "K", net: "RAW_DC_POS" },
+          ],
+        },
+        {
+          id: "d_br4",
+          type: "diode",
+          designator: "D4",
+          value: "1N4007",
+          footprint: "DO-41",
+          x: 420,
+          y: 330,
+          rotation: 180,
+          pins: [
+            { id: "1", name: "A", net: "RAW_DC_NEG" },
+            { id: "2", name: "K", net: "AC_L2" },
+          ],
+        },
+        {
+          id: "c_reservoir",
+          type: "polarized_capacitor",
+          designator: "C1",
+          value: "1000uF",
+          footprint: "CP_Radial_D10.0mm",
+          x: 540,
+          y: 260,
+          rotation: 90,
+          pins: [
+            { id: "1", name: "+", net: "RAW_DC_POS" },
+            { id: "2", name: "-", net: "RAW_DC_NEG" },
+          ],
+        },
+        {
+          id: "r_zener",
+          type: "resistor",
+          designator: "R1",
+          value: "150R",
+          footprint: "R_Axial_DIN0207",
+          x: 640,
+          y: 200,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "RAW_DC_POS" },
+            { id: "2", name: "2", net: "5V1_REG" },
+          ],
+        },
+        {
+          id: "d_zener",
+          type: "zener_diode",
+          designator: "D5",
+          value: "BZX79C5V1",
+          footprint: "DO-35",
+          x: 740,
+          y: 260,
+          rotation: 270,
+          pins: [
+            { id: "1", name: "A", net: "RAW_DC_NEG" },
+            { id: "2", name: "K", net: "5V1_REG" },
+          ],
+        },
+        {
+          id: "pwr_gnd",
+          type: "gnd",
+          designator: "GND1",
+          value: "0V",
+          footprint: "GND_FLAG",
+          x: 540,
+          y: 420,
+          rotation: 0,
+          pins: [{ id: "1", name: "GND", net: "RAW_DC_NEG" }],
+        },
+      ],
+      nets: [
+        { name: "AC_L1", color: "#f59e0b" },
+        { name: "AC_L2", color: "#f97316" },
+        { name: "RAW_DC_POS", color: "#ef4444" },
+        { name: "RAW_DC_NEG", color: "#3b82f6" },
+        { name: "5V1_REG", color: "#10b981" },
+      ],
+    };
+  }
+
+  // 9. Default General Electronic Circuit
   return {
     title: "Precision Electronic Sensor & Indicator Circuit",
     category: "General Electronics",
@@ -831,25 +1575,48 @@ ${context ? `Existing context/constraints: ${JSON.stringify(context)}` : ""}
 Return valid JSON adhering to the specified schema. Ensure all critical power (VCC, GND) and signal nets are properly connected so the circuit would legitimately work in hardware.`;
 
     let contentsPayload: any = promptText;
-    if (image && typeof image === "string") {
+    if (image && typeof image === "string" && image.trim().length > 0) {
       let mimeType = "image/jpeg";
-      let base64Data = image;
-      const match = image.match(/^data:([^;]+);base64,(.+)$/);
-      if (match) {
-        mimeType = match[1];
-        base64Data = match[2];
+      let base64Data = "";
+
+      const trimmedImg = image.trim();
+      if (trimmedImg.startsWith("data:image/svg+xml;utf8,") || trimmedImg.startsWith("<svg")) {
+        const svgContent = trimmedImg.startsWith("data:image/svg+xml;utf8,")
+          ? decodeURIComponent(trimmedImg.replace("data:image/svg+xml;utf8,", ""))
+          : trimmedImg;
+        mimeType = "image/svg+xml";
+        base64Data = Buffer.from(svgContent, "utf-8").toString("base64");
+      } else {
+        const match = trimmedImg.match(/^data:([^;]+);base64,(.+)$/s);
+        if (match) {
+          mimeType = match[1];
+          base64Data = match[2].replace(/[\r\n\s]/g, "");
+        } else {
+          const commaIdx = trimmedImg.indexOf(",");
+          if (commaIdx !== -1 && trimmedImg.startsWith("data:")) {
+            const header = trimmedImg.slice(0, commaIdx);
+            const m = header.match(/^data:([^;]+)/);
+            if (m) mimeType = m[1];
+            base64Data = trimmedImg.slice(commaIdx + 1).replace(/[\r\n\s]/g, "");
+          } else {
+            base64Data = trimmedImg.replace(/[\r\n\s]/g, "");
+          }
+        }
       }
-      contentsPayload = [
-        {
-          inlineData: {
-            mimeType,
-            data: base64Data,
+
+      if (base64Data && base64Data.length > 20) {
+        contentsPayload = [
+          {
+            inlineData: {
+              mimeType,
+              data: base64Data,
+            },
           },
-        },
-        {
-          text: `${promptText}\n\nCRITICAL MULTIMODAL INSTRUCTION: The user has attached an image or rough diagram (hand-drawn whiteboard sketch, notebook drawing, or technical diagram). Visually inspect the drawing, recognize each electronic part (resistors, capacitors, ICs, transistors, power supplies, GND, LEDs, etc.), read any handwritten or printed values, trace all wiring paths and connections, and accurately translate this visual circuit into the structured schematic JSON schema.`,
-        },
-      ];
+          {
+            text: `${promptText}\n\nCRITICAL MULTIMODAL INSTRUCTION: The user has attached an image or rough diagram (hand-drawn whiteboard sketch, notebook drawing, or technical diagram). Visually inspect the drawing, recognize each electronic part (resistors, capacitors, ICs, transistors, power supplies, GND, LEDs, etc.), read any handwritten or printed values, trace all wiring paths and connections, and accurately translate this visual circuit into the structured schematic JSON schema.`,
+          },
+        ];
+      }
     }
 
     let circuitData: any = null;
@@ -941,21 +1708,38 @@ Return valid JSON adhering to the specified schema. Ensure all critical power (V
     } catch (aiErr: any) {
       const cleanError = extractCleanErrorMessage(aiErr);
       console.warn(`[AI Generation Fallback] Cloud model unavailable (${cleanError}). Activating built-in EDA synthesis.`);
-      circuitData = generateFallbackCircuit(prompt, cleanError);
+      circuitData = generateFallbackCircuit(effectivePrompt, cleanError);
+      modelUsed = "local_eda_engine";
     }
 
-    res.json({ success: true, circuit: circuitData, modelUsed });
+    if (!res.headersSent) {
+      res.json({
+        success: true,
+        circuit: circuitData,
+        modelUsed,
+        isFallback: Boolean(circuitData?.synthesizedFallback),
+      });
+    }
   } catch (error: any) {
     const cleanMsg = extractCleanErrorMessage(error);
     console.error("AI Schematic generation unexpected error:", cleanMsg);
     // Last resort safety: return synthesized fallback circuit instead of 500 error
     try {
-      const fallback = generateFallbackCircuit(req.body?.prompt || "Circuit", cleanMsg);
-      res.json({ success: true, circuit: fallback, modelUsed: "fallback_recovery" });
+      if (!res.headersSent) {
+        const fallback = generateFallbackCircuit(req.body?.prompt || "Circuit", cleanMsg);
+        res.json({
+          success: true,
+          circuit: fallback,
+          modelUsed: "fallback_recovery",
+          isFallback: true,
+        });
+      }
     } catch (finalErr) {
-      res.status(500).json({
-        error: cleanMsg || "Failed to generate circuit schematic",
-      });
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: cleanMsg || "Failed to generate circuit schematic",
+        });
+      }
     }
   }
 });
@@ -1013,6 +1797,188 @@ ${JSON.stringify(circuit, null, 2)}`;
     res.status(500).json({ error: cleanMsg || "Failed to analyze circuit" });
   }
 });
+
+// Direct Google & Web Reference search endpoint for electronic components and circuits
+app.post("/api/google/search", async (req, res) => {
+  try {
+    const { query, type = "all" } = req.body;
+    const q = (typeof query === "string" ? query.trim() : "") || "Arduino Sensors";
+
+    const prompt = `Search electronic databases, manufacturer datasheets, and circuit repositories for: "${q}".
+Filter Type: ${type} (all, component, circuit).
+
+Return an array of 3 to 6 verified real-world electronic components and/or modular sub-circuits matching the query.
+For each item provide:
+- id: unique string e.g. "google_part_1"
+- title: exact part or circuit name (e.g., "INA219 High-Side DC Current & Power Sensor", "LM2596 Step-Down Buck Converter Module", "NE555 Precision Timer", "BME280 Weather Station Subcircuit")
+- type: either "component" or "circuit"
+- category: sensors, modules, power, ics, semiconductors, or passives
+- description: concise summary of datasheet specs and primary function
+- manufacturer: e.g. Texas Instruments, Bosch Sensortec, STMicroelectronics, DFRobot, SparkFun, or Generic
+- partNumber: manufacturer part number or module code
+- datasheetUrl: direct datasheet or manufacturer reference URL (e.g. https://www.ti.com, https://www.alldatasheet.com)
+- googleSearchUrl: https://www.google.com/search?q=${encodeURIComponent(q + " datasheet pinout")}
+- supplyVoltage: operating voltage range e.g. "3.3V - 5.0V DC"
+- footprint: standard footprint e.g. "SOT-23-6", "DIP-8", "MODULE_HEADER_5PIN"
+- pins: pin definitions array [{ id: "1", name: "VCC", direction: "left", type: "power" }, { id: "2", name: "GND", direction: "left", type: "ground" }, ...]
+- circuitData: (if type === 'circuit') an object with { title, summary, components: [...], wires: [...] }`;
+
+    try {
+      const ai = getGenAI();
+      const result = await generateContentWithRetryAndFallback(ai, {
+        contents: prompt,
+        config: {
+          systemInstruction:
+            "You are an expert Google Electronics Search agent. Return factual, precise datasheet specifications, accurate pinouts, and clean electrical netlists in valid JSON.",
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              results: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.STRING },
+                    title: { type: Type.STRING },
+                    type: { type: Type.STRING, description: "component or circuit" },
+                    category: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    manufacturer: { type: Type.STRING },
+                    partNumber: { type: Type.STRING },
+                    datasheetUrl: { type: Type.STRING },
+                    googleSearchUrl: { type: Type.STRING },
+                    supplyVoltage: { type: Type.STRING },
+                    footprint: { type: Type.STRING },
+                    pins: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          id: { type: Type.STRING },
+                          name: { type: Type.STRING },
+                          direction: { type: Type.STRING },
+                          type: { type: Type.STRING },
+                        },
+                        required: ["id", "name"],
+                      },
+                    },
+                  },
+                  required: ["id", "title", "type", "description"],
+                },
+              },
+            },
+            required: ["results"],
+          },
+        },
+      });
+
+      const parsed = cleanAndParseJSON(result.response.text);
+      res.json({ success: true, results: parsed.results || [], modelUsed: result.modelUsed });
+    } catch (aiErr) {
+      console.warn("[Google Search] Cloud model fallback. Returning synthesized electronics catalogue.");
+      // Fallback curated Google references
+      const lower = q.toLowerCase();
+      const fallbackResults = [
+        {
+          id: "goog_ina219",
+          title: "INA219 Zero-Drift Bidirectional Current/Power Monitor",
+          type: "component",
+          category: "sensors",
+          description: "I2C-interface current and power monitor with 12-bit ADC, senses bus voltages up to 26V with high accuracy.",
+          manufacturer: "Texas Instruments",
+          partNumber: "INA219AIDR",
+          datasheetUrl: "https://www.ti.com/lit/ds/symlink/ina219.pdf",
+          googleSearchUrl: `https://www.google.com/search?q=${encodeURIComponent(q + " INA219 datasheet")}`,
+          supplyVoltage: "3.0V - 5.5V DC",
+          footprint: "MODULE_6PIN",
+          pins: [
+            { id: "1", name: "VCC", direction: "left", type: "power" },
+            { id: "2", name: "GND", direction: "left", type: "ground" },
+            { id: "3", name: "SCL", direction: "left", type: "input" },
+            { id: "4", name: "SDA", direction: "left", type: "bidirectional" },
+            { id: "5", name: "VIN+", direction: "right", type: "input" },
+            { id: "6", name: "VIN-", direction: "right", type: "input" },
+          ],
+        },
+        {
+          id: "goog_bme680",
+          title: "BME680 Environmental Gas, Pressure, Temp & Humidity",
+          type: "component",
+          category: "sensors",
+          description: "4-in-1 digital sensor measuring VOC air quality, barometric pressure, ambient temperature, and relative humidity via I2C/SPI.",
+          manufacturer: "Bosch Sensortec",
+          partNumber: "BME680",
+          datasheetUrl: "https://www.bosch-sensortec.com/products/environmental-sensors/gas-sensors/bme680/",
+          googleSearchUrl: `https://www.google.com/search?q=${encodeURIComponent(q + " BME680 datasheet")}`,
+          supplyVoltage: "1.71V - 3.6V DC",
+          footprint: "MODULE_6PIN",
+          pins: [
+            { id: "1", name: "VIN", direction: "left", type: "power" },
+            { id: "2", name: "3V3", direction: "left", type: "power" },
+            { id: "3", name: "GND", direction: "left", type: "ground" },
+            { id: "4", name: "SCK/SCL", direction: "right", type: "input" },
+            { id: "5", name: "SDI/SDA", direction: "right", type: "bidirectional" },
+            { id: "6", name: "SDO", direction: "right", type: "output" },
+            { id: "7", name: "CS", direction: "right", type: "input" },
+          ],
+        },
+        {
+          id: "goog_esp32_wroom",
+          title: "ESP32-WROOM-32D Wi-Fi & Bluetooth MCU Module",
+          type: "component",
+          category: "modules",
+          description: "Dual-core Tensilica Xtensa 32-bit LX6 MCU running up to 240 MHz with integrated 2.4 GHz Wi-Fi, BLE, and hardware crypto acceleration.",
+          manufacturer: "Espressif Systems",
+          partNumber: "ESP32-WROOM-32D",
+          datasheetUrl: "https://www.espressif.com/sites/default/files/documentation/esp32-wroom-32d_esp32-wroom-32u_datasheet_en.pdf",
+          googleSearchUrl: `https://www.google.com/search?q=${encodeURIComponent(q + " ESP32-WROOM-32 datasheet")}`,
+          supplyVoltage: "3.0V - 3.6V DC",
+          footprint: "MODULE_ESP32_38PIN",
+          pins: [
+            { id: "1", name: "3V3", direction: "left", type: "power" },
+            { id: "2", name: "EN", direction: "left", type: "input" },
+            { id: "3", name: "GPIO34", direction: "left", type: "input" },
+            { id: "4", name: "GPIO35", direction: "left", type: "input" },
+            { id: "5", name: "GPIO32", direction: "left", type: "bidirectional" },
+            { id: "6", name: "GPIO33", direction: "left", type: "bidirectional" },
+            { id: "7", name: "GND", direction: "right", type: "ground" },
+            { id: "8", name: "GPIO23", direction: "right", type: "bidirectional" },
+            { id: "9", name: "GPIO22", direction: "right", type: "bidirectional" },
+            { id: "10", name: "TXD0", direction: "right", type: "output" },
+            { id: "11", name: "RXD0", direction: "right", type: "input" },
+            { id: "12", name: "GPIO21", direction: "right", type: "bidirectional" },
+          ],
+        },
+        {
+          id: "goog_lm2596_buck",
+          title: "LM2596 DC-DC Step-Down Buck Converter Module",
+          type: "circuit",
+          category: "power",
+          description: "High efficiency step-down voltage converter. Accepts 4V-35V input and produces stable adjustable 1.25V-30V output up to 3A.",
+          manufacturer: "Texas Instruments / Multi-vendor",
+          partNumber: "LM2596S-ADJ",
+          datasheetUrl: "https://www.ti.com/lit/ds/symlink/lm2596.pdf",
+          googleSearchUrl: `https://www.google.com/search?q=${encodeURIComponent(q + " LM2596 circuit")}`,
+          supplyVoltage: "4.5V - 35V DC",
+          footprint: "MODULE_BUCK_4PIN",
+          pins: [
+            { id: "1", name: "IN+", direction: "left", type: "power" },
+            { id: "2", name: "IN- (GND)", direction: "left", type: "ground" },
+            { id: "3", name: "OUT+", direction: "right", type: "power" },
+            { id: "4", name: "OUT- (GND)", direction: "right", type: "ground" },
+          ],
+        },
+      ];
+
+      res.json({ success: true, results: fallbackResults, modelUsed: "curated_catalogue" });
+    }
+  } catch (error: any) {
+    const cleanMsg = extractCleanErrorMessage(error);
+    res.status(500).json({ error: cleanMsg || "Search failed" });
+  }
+});
+
 
 // Setup Vite development middleware or static production serve
 async function startServer() {

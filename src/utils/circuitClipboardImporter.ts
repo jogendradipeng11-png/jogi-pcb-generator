@@ -49,23 +49,28 @@ export function parseCircuitInfoFromUrl(urlStr: string): { title: string; prompt
 
   // Extract slug from URL path
   const segments = pathname.split('/').filter(Boolean);
-  let slug = segments[segments.length - 1] || '';
-  if (slug.endsWith('.html') || slug.endsWith('.php') || slug.endsWith('.asp')) {
-    slug = slug.replace(/\.[^.]+$/, '');
+  let rawSlug = segments[segments.length - 1] || '';
+  try {
+    rawSlug = decodeURIComponent(rawSlug);
+  } catch {
+    // keep raw
   }
 
+  // Strip all file extensions (.png, .jpg, .jpeg, .webp, .svg, .gif, .bmp, .html, .php, etc.)
+  const cleanSlug = rawSlug.replace(/\.(png|jpe?g|webp|svg|gif|bmp|html|php|asp|htm)$/i, '');
+
   // If slug has hyphens or underscores
-  let title = slug
-    ? slug.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim()
+  let title = cleanSlug
+    ? cleanSlug.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim()
     : 'Web Circuit Schematic';
 
   if (!title || title.length < 3) {
     title = 'Synthesized Web Circuit';
   }
 
-  const prompt = `${title} ${trimmed}`;
+  const prompt = `${title} ${cleanSlug} ${trimmed}`;
   const isCircuitUrl =
-    /circuit|schematic|diy|sensor|timer|555|charger|relay|regulator|amplifier|transistor|led|arduino|esp32|microcontroller|inverter|switch|power/i.test(
+    /circuit|schematic|diy|sensor|timer|555|charger|relay|opto|moc30|triac|ssr|regulator|amplifier|transistor|led|arduino|esp32|microcontroller|inverter|switch|power/i.test(
       trimmed
     );
 

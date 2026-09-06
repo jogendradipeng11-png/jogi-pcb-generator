@@ -732,6 +732,209 @@ export function synthesizeClientCircuit(prompt: string, hintTitle?: string): Sch
         pins: [{ id: '1', name: 'GND', net: 'GND' }],
       },
     ];
+  } else if (
+    p.includes('moc3021') ||
+    p.includes('optoisolator') ||
+    p.includes('solid state relay') ||
+    p.includes('solid-state-relay') ||
+    p.includes('ssr') ||
+    p.includes('phototriac') ||
+    p.includes('triac') ||
+    (p.includes('opto') && (p.includes('relay') || p.includes('triac') || p.includes('switch')))
+  ) {
+    title = extractedUrlTitle || 'Solid State Relay (MOC3021 Optoisolator + TRIAC)';
+    category = 'Optoelectronics / Power Switching';
+    summary =
+      'Isolated Solid State Relay (SSR) circuit using MOC3021 random-phase phototriac optoisolator and BT136/BTA16 TRIAC for safe galvanic isolation between low-voltage DC logic and 230VAC mains loads.';
+    formula =
+      'I_LED = (V_ctrl - V_f) / R1 = (5V - 1.2V) / 330Ω ≈ 11.5mA | dv/dt = V_peak / (R_snub * C_snub)';
+    specifications = [
+      'Input Control Voltage: 3.3V - 5V DC (MCU GPIO / Arduino compatible)',
+      'Galvanic Isolation: 7,500V Peak between low-voltage control and AC mains',
+      'AC Mains Voltage: 120V - 240V AC, 50/60Hz',
+      'Output Switching Device: BT136-600E / BTA16 TRIAC (up to 4A - 16A)',
+      'Transient Snubber: RC network (39Ω + 10nF 400V) suppresses inductive dv/dt spikes',
+    ];
+    tips = [
+      'Keep low-voltage DC logic wires physically separated from high-voltage 230V AC lines on the PCB.',
+      'The RC snubber network across TRIAC MT1 and MT2 prevents accidental triggering caused by inductive load back-EMF.',
+      'Mount a small aluminum heatsink to the TRIAC tab if driving resistive or inductive loads above 200W.',
+    ];
+    rawComponents = [
+      {
+        id: 'c_vctrl',
+        type: 'vcc',
+        designator: 'VCC1',
+        value: '+5V DC Control',
+        footprint: 'POWER_PORT',
+        x: 80,
+        y: 120,
+        pins: [{ id: '1', name: 'VCC', net: 'VCTRL' }],
+      },
+      {
+        id: 'c_sw_in',
+        type: 'switch',
+        designator: 'SW1',
+        value: 'Logic Input',
+        footprint: 'SW_PUSH_6MM',
+        x: 180,
+        y: 120,
+        pins: [
+          { id: '1', name: 'COM', net: 'VCTRL' },
+          { id: '2', name: 'NO', net: 'SW_TRIG' },
+        ],
+      },
+      {
+        id: 'c_rlimit',
+        type: 'resistor',
+        designator: 'R1',
+        value: '330Ω 1/4W',
+        footprint: 'R0805',
+        x: 290,
+        y: 120,
+        pins: [
+          { id: '1', name: '1', net: 'SW_TRIG' },
+          { id: '2', name: '2', net: 'OPTO_ANODE' },
+        ],
+      },
+      {
+        id: 'c_led_status',
+        type: 'led',
+        designator: 'LED1',
+        value: 'Green (Active)',
+        footprint: 'LED0805',
+        x: 290,
+        y: 220,
+        pins: [
+          { id: '1', name: 'A', net: 'SW_TRIG' },
+          { id: '2', name: 'K', net: 'RLED_TOP' },
+        ],
+      },
+      {
+        id: 'c_rled',
+        type: 'resistor',
+        designator: 'R4',
+        value: '1kΩ',
+        footprint: 'R0805',
+        x: 290,
+        y: 300,
+        pins: [
+          { id: '1', name: '1', net: 'RLED_TOP' },
+          { id: '2', name: '2', net: 'DC_GND' },
+        ],
+      },
+      {
+        id: 'c_moc3021',
+        type: 'optocoupler',
+        designator: 'U1',
+        value: 'MOC3021 Optoisolator',
+        footprint: 'DIP-6',
+        x: 430,
+        y: 160,
+        pins: [
+          { id: '1', name: '1 (Anode)', net: 'OPTO_ANODE' },
+          { id: '2', name: '2 (Cathode)', net: 'DC_GND' },
+          { id: '4', name: '4 (Gate Drive)', net: 'TRIAC_GATE' },
+          { id: '6', name: '6 (Detector)', net: 'OPTO_PIN6' },
+        ],
+      },
+      {
+        id: 'c_gnd_dc',
+        type: 'gnd',
+        designator: 'GND_DC',
+        value: 'DC GND',
+        footprint: 'POWER_PORT',
+        x: 430,
+        y: 340,
+        pins: [{ id: '1', name: 'GND', net: 'DC_GND' }],
+      },
+      {
+        id: 'c_rgate',
+        type: 'resistor',
+        designator: 'R2',
+        value: '360Ω 1/2W',
+        footprint: 'R1206',
+        x: 560,
+        y: 110,
+        pins: [
+          { id: '1', name: '1', net: 'AC_HOT_LOAD' },
+          { id: '2', name: '2', net: 'OPTO_PIN6' },
+        ],
+      },
+      {
+        id: 'c_triac',
+        type: 'triac',
+        designator: 'Q1',
+        value: 'BT136-600E TRIAC',
+        footprint: 'TO-220',
+        x: 700,
+        y: 180,
+        pins: [
+          { id: '1', name: 'MT1 (A1)', net: 'AC_NEUTRAL' },
+          { id: '2', name: 'MT2 (A2)', net: 'AC_HOT_LOAD' },
+          { id: '3', name: 'G (Gate)', net: 'TRIAC_GATE' },
+        ],
+      },
+      {
+        id: 'c_snub_r',
+        type: 'resistor',
+        designator: 'R3',
+        value: '39Ω 1W',
+        footprint: 'R2512',
+        x: 580,
+        y: 230,
+        pins: [
+          { id: '1', name: '1', net: 'AC_HOT_LOAD' },
+          { id: '2', name: '2', net: 'SNUB_MID' },
+        ],
+      },
+      {
+        id: 'c_snub_c',
+        type: 'capacitor',
+        designator: 'C1',
+        value: '10nF 400V X2',
+        footprint: 'CAP-FILM-10MM',
+        x: 580,
+        y: 320,
+        pins: [
+          { id: '1', name: '1', net: 'SNUB_MID' },
+          { id: '2', name: '2', net: 'AC_NEUTRAL' },
+        ],
+      },
+      {
+        id: 'c_ac_live',
+        type: 'vcc',
+        designator: 'AC_LIVE',
+        value: '230VAC Live (L)',
+        footprint: 'POWER_PORT',
+        x: 200,
+        y: 40,
+        pins: [{ id: '1', name: 'VCC', net: 'AC_LIVE' }],
+      },
+      {
+        id: 'c_ac_load',
+        type: 'lamp',
+        designator: 'LOAD1',
+        value: '230V AC Load (Lamp/Motor)',
+        footprint: 'TERMINAL_BLOCK_2P',
+        x: 430,
+        y: 40,
+        pins: [
+          { id: '1', name: '1', net: 'AC_LIVE' },
+          { id: '2', name: '2', net: 'AC_HOT_LOAD' },
+        ],
+      },
+      {
+        id: 'c_ac_neutral',
+        type: 'gnd',
+        designator: 'AC_NEUT',
+        value: 'AC Neutral (N)',
+        footprint: 'POWER_PORT',
+        x: 820,
+        y: 250,
+        pins: [{ id: '1', name: 'GND', net: 'AC_NEUTRAL' }],
+      },
+    ];
   } else if (p.includes('relay') || p.includes('transistor') || p.includes('2n2222') || p.includes('bjt') || p.includes('driver')) {
     title = '2N2222 NPN Transistor Relay Driver';
     category = 'Drivers / Electromechanical';

@@ -42,6 +42,7 @@ import {
   HelpCircle,
   Github,
   ClipboardPaste,
+  Triangle,
 } from 'lucide-react';
 import { EditorTool, CanvasViewMode, SchematicDocument, UserProfile, SimulationState, SchematicComponent, Wire, SimulationScenario, OperatingConditions } from '../../types';
 import { STARTER_CIRCUITS } from '../../data/examples';
@@ -481,15 +482,15 @@ export const Header: React.FC<HeaderProps> = ({
             <Download className="w-4 h-4" />
           </button>
 
-          {/* GitHub Deploy & Export Button */}
+          {/* GitHub / Vercel Deploy & Export Button */}
           {onOpenGitHubModal && (
             <button
               onClick={onOpenGitHubModal}
               className="px-2.5 py-1.5 bg-slate-850 hover:bg-slate-800 text-slate-200 hover:text-white rounded-lg text-xs font-semibold border border-slate-700/80 hover:border-slate-600 flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
-              title="Deploy circuit designer via GitHub & invite users to sign up"
+              title="Deploy & update circuit designer in Vercel, GitHub, or Netlify"
             >
-              <Github className="w-3.5 h-3.5 text-sky-400" />
-              <span>Deploy</span>
+              <Triangle className="w-3 h-3 fill-white text-white" />
+              <span>Deploy / Vercel</span>
             </button>
           )}
 

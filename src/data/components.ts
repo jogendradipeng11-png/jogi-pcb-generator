@@ -1137,6 +1137,85 @@ const RAW_COMPONENT_CATALOG: ComponentDefinition[] = [
     symbol: 'generic_ic',
     uses: 'Variable bench power supplies, current limiters, programmable output supplies, and battery chargers.',
   },
+  {
+    type: 'nodemcu_esp8266',
+    name: 'NodeMCU V3 ESP8266 Module',
+    prefix: 'U',
+    category: 'modules',
+    defaultVal: 'NodeMCU ESP-12E',
+    defaultFootprint: 'MODULE_NODEMCU_V3',
+    width: 120,
+    height: 200,
+    pins: [
+      { id: '1', name: 'A0', x: -60, y: -80, direction: 'left', type: 'input' },
+      { id: '2', name: 'RSV1', x: -60, y: -70, direction: 'left' },
+      { id: '3', name: 'RSV2', x: -60, y: -60, direction: 'left' },
+      { id: '4', name: 'SD3', x: -60, y: -50, direction: 'left' },
+      { id: '5', name: 'SD2', x: -60, y: -40, direction: 'left' },
+      { id: '6', name: 'SD1', x: -60, y: -30, direction: 'left' },
+      { id: '7', name: 'CMD', x: -60, y: -20, direction: 'left' },
+      { id: '8', name: 'SD0', x: -60, y: -10, direction: 'left' },
+      { id: '9', name: 'CLK', x: -60, y: 0, direction: 'left' },
+      { id: '10', name: 'GND', x: -60, y: 20, direction: 'left', type: 'ground' },
+      { id: '11', name: '3V3', x: -60, y: 40, direction: 'left', type: 'power' },
+      { id: '12', name: 'EN', x: -60, y: 55, direction: 'left' },
+      { id: '13', name: 'RST', x: -60, y: 70, direction: 'left' },
+      { id: '14', name: 'VIN', x: -60, y: 85, direction: 'left', type: 'power' },
+      { id: '15', name: 'D0', x: 60, y: -80, direction: 'right' },
+      { id: '16', name: 'D1 (SCL)', x: 60, y: -70, direction: 'right' },
+      { id: '17', name: 'D2 (SDA)', x: 60, y: -60, direction: 'right' },
+      { id: '18', name: 'D3', x: 60, y: -50, direction: 'right' },
+      { id: '19', name: 'D4', x: 60, y: -40, direction: 'right' },
+      { id: '20', name: '3V3', x: 60, y: -30, direction: 'right', type: 'power' },
+      { id: '21', name: 'GND', x: 60, y: -20, direction: 'right', type: 'ground' },
+      { id: '22', name: 'D5', x: 60, y: 0, direction: 'right' },
+      { id: '23', name: 'D6', x: 60, y: 20, direction: 'right' },
+      { id: '24', name: 'D7', x: 60, y: 40, direction: 'right' },
+      { id: '25', name: 'D8', x: 60, y: 55, direction: 'right' },
+      { id: '26', name: 'RX', x: 60, y: 70, direction: 'right' },
+      { id: '27', name: 'TX', x: 60, y: 85, direction: 'right' },
+    ],
+    description: 'NodeMCU ESP-12E Wi-Fi development board with integrated CP2102/CH340 USB-UART',
+    symbol: 'generic_ic',
+    uses: 'IoT smart relays, home automation, Wi-Fi web servers, cloud telemetry, MQTT nodes.',
+  },
+  {
+    type: 'ttp223_touch',
+    name: 'TTP223 Capacitive Touch Sensor',
+    prefix: 'U',
+    category: 'sensors',
+    defaultVal: 'TTP223 Touch',
+    defaultFootprint: 'MODULE_TTP223_3P',
+    width: 70,
+    height: 50,
+    pins: [
+      { id: '1', name: 'VCC', x: -35, y: -12, direction: 'left', type: 'power' },
+      { id: '2', name: 'I/O', x: 35, y: 0, direction: 'right', type: 'output' },
+      { id: '3', name: 'GND', x: -35, y: 12, direction: 'left', type: 'ground' },
+    ],
+    description: 'Single-channel capacitive touch sensor key switch module based on TTP223 IC',
+    symbol: 'generic_ic',
+    uses: 'Touch-activated light switches, human proximity sensing, capacitive buttons.',
+  },
+  {
+    type: 'power_hilink_5m05',
+    name: 'Hi-Link HLK-5M05 AC-DC 5V Supply',
+    prefix: 'PS',
+    category: 'power',
+    defaultVal: 'HLK-5M05 (5V 1A)',
+    defaultFootprint: 'POWER_HLK_5M05',
+    width: 80,
+    height: 70,
+    pins: [
+      { id: '1', name: 'AC1', number: '1', x: -40, y: -15, direction: 'left', type: 'passive' },
+      { id: '2', name: 'AC2', number: '2', x: -40, y: 15, direction: 'left', type: 'passive' },
+      { id: '3', name: '+Vo (5V)', number: '3', x: 40, y: -15, direction: 'right', type: 'power' },
+      { id: '4', name: '-Vo (GND)', number: '4', x: 40, y: 15, direction: 'right', type: 'ground' },
+    ],
+    description: 'Compact isolated AC-DC switch mode power supply module (100-240V AC to 5V DC 5W)',
+    symbol: 'bridge_rectifier',
+    uses: 'Powering NodeMCU/ESP8266/ESP32 and 5V relays directly from mains 110V/220V AC.',
+  },
   ...SENSOR_DEFINITIONS,
 ];
 
@@ -1169,6 +1248,50 @@ export function getComponentDef(type: string): ComponentDefinition {
   }
   const found = COMPONENT_CATALOG.find((c) => c.type === type);
   if (found) return found;
+
+  const raw = (type || '').toLowerCase().trim();
+  const normalized = raw.replace(/[^a-z0-9_]/g, '_');
+
+  const aliasMap: Record<string, string> = {
+    nodemcu: 'nodemcu_esp8266',
+    nodemcu_v3: 'nodemcu_esp8266',
+    nodemcu_esp8266: 'nodemcu_esp8266',
+    esp8266: 'nodemcu_esp8266',
+    esp8266_nodemcu: 'nodemcu_esp8266',
+    esp12e: 'nodemcu_esp8266',
+    dht11: 'sensor_dht11',
+    dht_11: 'sensor_dht11',
+    sensor_dht11: 'sensor_dht11',
+    dht22: 'sensor_dht22',
+    ttp223: 'ttp223_touch',
+    ttp223_touch: 'ttp223_touch',
+    touch_sensor: 'ttp223_touch',
+    hilink: 'power_hilink_5m05',
+    hlk_5m05: 'power_hilink_5m05',
+    hlk_pm01: 'power_hilink_5m05',
+    hi_link: 'power_hilink_5m05',
+    oled: 'display_oled_i2c',
+    oled_i2c: 'display_oled_i2c',
+    ssd1306: 'display_oled_i2c',
+    bc547: 'transistor_npn',
+    bc547_npn: 'transistor_npn',
+    '2n2222': 'transistor_npn',
+    npn: 'transistor_npn',
+    relay: 'relay_5v',
+    relay_5v: 'relay_5v',
+    relay_spdt: 'relay_spdt',
+    ldr: 'sensor_ldr',
+    photoresistor: 'sensor_ldr',
+    pushbutton: 'switch_spst',
+    button: 'switch_spst',
+    switch: 'switch_spst',
+  };
+
+  const targetType = aliasMap[normalized] || aliasMap[raw];
+  if (targetType) {
+    const aliased = COMPONENT_CATALOG.find((c) => c.type === targetType);
+    if (aliased) return aliased;
+  }
 
   // Fallback for custom or IC types
   return {

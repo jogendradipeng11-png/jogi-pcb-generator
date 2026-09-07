@@ -46,6 +46,7 @@ import {
   Save,
   Copy,
   Upload,
+  Brain,
 } from 'lucide-react';
 import { EditorTool, CanvasViewMode, SchematicDocument, UserProfile, SimulationState, SchematicComponent, Wire, SimulationScenario, OperatingConditions } from '../../types';
 import { STARTER_CIRCUITS } from '../../data/examples';
@@ -58,6 +59,7 @@ interface HeaderProps {
   onToolChange: (tool: EditorTool) => void;
   onOpenAiModal: () => void;
   onOpenLoadDiagram?: () => void;
+  onOpenCircuitBrain?: () => void;
   onOpenChatDrawer?: () => void;
   onOpenBom: () => void;
   onOpenErc: () => void;
@@ -116,6 +118,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToolChange,
   onOpenAiModal,
   onOpenLoadDiagram,
+  onOpenCircuitBrain,
   onOpenChatDrawer,
   onOpenBom,
   onOpenErc,
@@ -173,7 +176,7 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="flex flex-col bg-slate-900 border-b border-slate-800 select-none text-slate-100 z-30">
       {/* Top Bar: Brand, Mode Switcher, Actions */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 overflow-x-auto scrollbar-none gap-3 shrink-0">
         {/* Brand & Document Name */}
         <div className="flex items-center space-x-3">
           <div className="flex items-center space-x-2">
@@ -353,6 +356,18 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Upload className="w-3.5 h-3.5 text-amber-300" />
               <span>Load Diagram / Rough Sketch</span>
+            </button>
+          )}
+
+          {/* Autonomous Circuit Brain & Self-Learning Innovator */}
+          {onOpenCircuitBrain && (
+            <button
+              onClick={onOpenCircuitBrain}
+              className="px-3 py-1.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-violet-600 hover:from-purple-500 hover:to-violet-500 text-white rounded-lg text-xs font-bold shadow-md shadow-purple-950/40 flex items-center gap-1.5 transition-all cursor-pointer border border-purple-400/50"
+              title="Autonomous AI Circuit Brain: learns continuously from every circuit and invents new circuits autonomously"
+            >
+              <Brain className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+              <span>AI Brain (Self-Learning)</span>
             </button>
           )}
 
@@ -557,10 +572,10 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onSaveCircuit}
               className="px-2.5 py-1.5 bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 hover:text-emerald-100 rounded-lg text-xs font-semibold border border-emerald-700/60 hover:border-emerald-600 flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-              title="Save Circuit (Local & Project Storage)"
+              title="Save Circuit File (.cirkit / .json) and persist to project memory"
             >
               <Save className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Save</span>
+              <span>Save File</span>
             </button>
           )}
 
@@ -739,7 +754,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Sub-Toolbar: Editor Tools & Canvas Controls */}
-      <div className="flex items-center justify-between px-4 py-1.5 bg-slate-950/60 text-xs">
+      <div className="flex items-center justify-between px-4 py-1.5 bg-slate-950/60 text-xs overflow-x-auto scrollbar-none gap-3 shrink-0">
         {/* Primary Schematic Tools */}
         <div className="flex items-center space-x-1">
           <button

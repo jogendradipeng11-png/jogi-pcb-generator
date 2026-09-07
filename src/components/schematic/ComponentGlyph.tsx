@@ -961,6 +961,82 @@ export const ComponentGlyph: React.FC<ComponentGlyphProps> = ({
           </g>
         );
 
+      case 'relay_4channel_module':
+        return (
+          <g>
+            {/* Main Blue PCB Board */}
+            <rect x="-65" y="-75" width="130" height="150" rx="6" fill="#1e3a8a" stroke="#3b82f6" strokeWidth="2" />
+            {/* Header banner */}
+            <rect x="-65" y="-75" width="130" height="16" rx="4" fill="#172554" />
+            <text x="0" y="-64" textAnchor="middle" fill="#60a5fa" fontSize="8" fontWeight="bold" fontFamily="sans-serif">
+              4-CHANNEL 5V RELAY MODULE
+            </text>
+            {/* 4x Songle Relay Cubes */}
+            {[-56, -24, 8, 40].map((yPos, i) => (
+              <g key={i} transform={`translate(0, ${yPos})`}>
+                <rect x="-35" y="0" width="70" height="24" rx="2" fill="#2563eb" stroke="#93c5fd" strokeWidth="1" />
+                <text x="0" y="11" textAnchor="middle" fill="#ffffff" fontSize="7" fontWeight="bold" fontFamily="monospace">
+                  SONGLE 5VDC
+                </text>
+                <text x="0" y="19" textAnchor="middle" fill="#bfdbfe" fontSize="5.5" fontFamily="sans-serif">
+                  10A 250VAC • K{i + 1}
+                </text>
+                {/* Status LED */}
+                <circle cx="-45" cy="12" r="2.5" fill="#ef4444" stroke="#ffffff" strokeWidth="0.5" />
+              </g>
+            ))}
+            {/* Input & Output terminal indicators */}
+            <text x="-58" y="70" textAnchor="start" fill="#93c5fd" fontSize="6" fontFamily="monospace">
+              VCC GND IN1-4
+            </text>
+            <text x="58" y="70" textAnchor="end" fill="#93c5fd" fontSize="6" fontFamily="monospace">
+              NO COM NC
+            </text>
+          </g>
+        );
+
+      case 'ir_receiver_1838':
+        return (
+          <g>
+            {/* Metal casing */}
+            <rect x="-25" y="-22" width="50" height="44" rx="4" fill="#1e293b" stroke="#94a3b8" strokeWidth="1.5" />
+            {/* IR Sensor Dome with mesh */}
+            <circle cx="0" cy="-2" r="13" fill="#0f172a" stroke="#cbd5e1" strokeWidth="1.5" />
+            {/* Crosshatch mesh lines */}
+            <line x1="-9" y1="-2" x2="9" y2="-2" stroke="#64748b" strokeWidth="1" />
+            <line x1="0" y1="-11" x2="0" y2="7" stroke="#64748b" strokeWidth="1" />
+            <line x1="-6" y1="-8" x2="6" y2="4" stroke="#64748b" strokeWidth="1" />
+            <line x1="-6" y1="4" x2="6" y2="-8" stroke="#64748b" strokeWidth="1" />
+            <text x="0" y="18" textAnchor="middle" fill="#e2e8f0" fontSize="6.5" fontWeight="bold" fontFamily="monospace">
+              VS1838B IR
+            </text>
+          </g>
+        );
+
+      case 'battery_18650_pack':
+        return (
+          <g>
+            {/* Battery holder frame */}
+            <rect x="-46" y="-28" width="92" height="56" rx="4" fill="#0f172a" stroke="#475569" strokeWidth="2" />
+            {/* Cell 1 (Purple Li-ion cylinder) */}
+            <rect x="-40" y="-24" width="36" height="48" rx="3" fill="#6b21a8" stroke="#c084fc" strokeWidth="1.2" />
+            <rect x="-26" y="-27" width="8" height="3" rx="1" fill="#e2e8f0" />
+            <text x="-22" y="4" textAnchor="middle" fill="#f3e8ff" fontSize="6" fontWeight="bold" fontFamily="monospace" transform="rotate(-90 -22 4)">
+              18650 Li-ion
+            </text>
+            {/* Cell 2 (Purple Li-ion cylinder) */}
+            <rect x="4" y="-24" width="36" height="48" rx="3" fill="#6b21a8" stroke="#c084fc" strokeWidth="1.2" />
+            <rect x="18" y="-27" width="8" height="3" rx="1" fill="#e2e8f0" />
+            <text x="22" y="4" textAnchor="middle" fill="#f3e8ff" fontSize="6" fontWeight="bold" fontFamily="monospace" transform="rotate(-90 22 4)">
+              18650 Li-ion
+            </text>
+            {/* Voltage badge */}
+            <text x="0" y="24" textAnchor="middle" fill="#38bdf8" fontSize="6" fontWeight="bold" fontFamily="sans-serif">
+              DUAL 18650 (3.7V - 7.4V)
+            </text>
+          </g>
+        );
+
       default:
         // Generic rectangular IC
         return (

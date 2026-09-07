@@ -42,6 +42,7 @@ import { AutoCorrectModal } from './components/modals/AutoCorrectModal';
 import { CircuitsDiyExplorerModal } from './components/modals/CircuitsDiyExplorerModal';
 import { ComponentPinoutModal } from './components/modals/ComponentPinoutModal';
 import { LoadDiagramSketchModal } from './components/modals/LoadDiagramSketchModal';
+import { CircuitBrainModal } from './components/modals/CircuitBrainModal';
 import { AiCircuitChatDrawer } from './components/chat/AiCircuitChatDrawer';
 import { getCurrentUser, setCurrentUser, subscribeToAuthChanges } from './utils/authService';
 import { loadUserSavedComponents } from './utils/userComponents';
@@ -51,6 +52,7 @@ import { autoRouteSchematicNets } from './utils/autorouter';
 import { reannotateComponents } from './utils/annotation';
 import { rotateCircuit } from './utils/circuitTransform';
 import { getComponentRealImageUrl } from './utils/componentImages';
+import { learnCircuit } from './utils/circuitBrainLearner';
 import {
   importCircuitFromImageDataUrl,
   importCircuitFromUrlOrText,
@@ -168,6 +170,7 @@ export default function App() {
   const [isAutoCorrectOpen, setIsAutoCorrectOpen] = useState(false);
   const [isPinoutModalOpen, setIsPinoutModalOpen] = useState(false);
   const [isLoadDiagramModalOpen, setIsLoadDiagramModalOpen] = useState(false);
+  const [isCircuitBrainOpen, setIsCircuitBrainOpen] = useState(false);
   const [isChatDrawerOpen, setIsChatDrawerOpen] = useState(false);
   const [productSelectorComp, setProductSelectorComp] = useState<SchematicComponent | null>(null);
   const [internalClipboard, setInternalClipboard] = useState<{
@@ -1256,9 +1259,10 @@ export default function App() {
     );
   }, [safeDoc, commitDocumentChange, showToast]);
 
-  // Save circuit to browser localStorage & persistent state
+  // Save circuit to browser localStorage, download file, & learn circuit pattern
   const handleSaveCircuit = useCallback(() => {
     try {
+      learnCircuit(safeDoc);
       localStorage.setItem('circuiteda_saved_circuit', JSON.stringify(safeDoc));
       const existingListStr = localStorage.getItem('circuiteda_saved_projects_list') || '[]';
       let existingList: any[] = [];
@@ -1279,7 +1283,19 @@ export default function App() {
       ].slice(0, 30);
       localStorage.setItem('circuiteda_saved_projects_list', JSON.stringify(updatedList));
 
-      showToast(`💾 Saved circuit "${safeDoc.title || 'Untitled'}" (${(safeDoc.components || []).length} parts, ${(safeDoc.wires || []).length} wires)!`);
+      // Trigger instant file download (.cirkit format)
+      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(safeDoc, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute('href', dataStr);
+      downloadAnchor.setAttribute(
+        'download',
+        `${(safeDoc.title || 'circuit').toLowerCase().replace(/[^a-z0-9]/g, '_')}.cirkit`
+      );
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+
+      showToast(`💾 Saved circuit "${safeDoc.title || 'Untitled'}" and downloaded file! AI Brain learned this circuit.`);
     } catch (e) {
       console.error('Error saving circuit:', e);
       showToast('Circuit state saved in memory.');
@@ -1417,6 +1433,7 @@ export default function App() {
         onInsertPowerReferences={handleInsertPowerReferences}
         onPasteFromClipboard={handlePasteFromClipboard}
         onOpenGitHubModal={() => setIsGitHubModalOpen(true)}
+        onOpenCircuitBrain={() => setIsCircuitBrainOpen(true)}
       />
 
       {/* Main Workspace Body */}
@@ -1886,13 +1903,15 @@ export default function App() {
       <LoadDiagramSketchModal
         isOpen={isLoadDiagramModalOpen}
         onClose={() => setIsLoadDiagramModalOpen(false)}
+        onSwitchViewMode={(mode) => setViewMode(mode)}
         onApplyCircuit={(circuit, mode) => {
+          learnCircuit(circuit);
           if (mode === 'replace') {
             const newDoc: SchematicDocument = {
               id: `sketch_${Date.now()}`,
               title: circuit.title || 'Imported Diagram / Sketch',
-              category: 'Loaded',
-              summary: circuit.description || 'Imported diagram transformed into verified schematic.',
+              category: circuit.category || 'Loaded',
+              summary: circuit.summary || circuit.description || 'Imported diagram transformed into verified schematic.',
               components: circuit.components || [],
               wires: circuit.wires || [],
               version: 1,
@@ -1926,9 +1945,22 @@ export default function App() {
               updatedAt: new Date().toISOString(),
             });
           }
-          setViewMode('schematic');
           showToast(`Successfully synthesized "${circuit.title}" with all components & wires!`);
         }}
+        onShowToast={showToast}
+      />
+
+      {/* Circuit Brain: Self-Learning Engine & Autonomous Circuit Modal */}
+      <CircuitBrainModal
+        isOpen={isCircuitBrainOpen}
+        onClose={() => setIsCircuitBrainOpen(false)}
+        onApplyCircuit={(circuit) => {
+          commitDocumentChange(sanitizeDocument(circuit));
+          setViewMode('schematic');
+          showToast(`⚡ Brain synthesized & loaded "${circuit.title}" into Schematic Editor!`);
+        }}
+        currentCircuit={safeDoc}
+        onSwitchViewMode={(mode) => setViewMode(mode)}
         onShowToast={showToast}
       />
 

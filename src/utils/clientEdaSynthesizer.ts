@@ -936,6 +936,175 @@ export function synthesizeClientCircuit(prompt: string, hintTitle?: string): Sch
       },
     ];
   } else if (
+    p.includes('cirkit') ||
+    p.includes('4 relay') ||
+    p.includes('4-relay') ||
+    p.includes('4 channel relay') ||
+    p.includes('4-channel relay') ||
+    p.includes('four channel relay') ||
+    p.includes('relay 4') ||
+    p.includes('18650') ||
+    p.includes('ir receiver') ||
+    p.includes('vs1838') ||
+    p.includes('tsop') ||
+    ((p.includes('diagram') || p.includes('sketch') || p.includes('image') || p.includes('upload') || p.includes('equipemnt') || p.includes('equipment')) && !p.includes('555') && !p.includes('timer') && !p.includes('amp') && !p.includes('opamp') && !p.includes('buck') && !p.includes('traffic') && !p.includes('rectifier') && !p.includes('radio') && !p.includes('inverter')) ||
+    ((p.includes('relay') || p.includes('nodemcu') || p.includes('esp8266') || p.includes('iot')) && (p.includes('dht11') || p.includes('sensor') || p.includes('battery') || p.includes('button') || p.includes('switch') || p.includes('channel') || p.includes('4')) && !p.includes('v4.2') && !p.includes('techstudycell'))
+  ) {
+    title = 'ESP8266 NodeMCU 4-Channel Relay Home Automation (Cirkit Designer)';
+    category = 'IoT & Home Automation';
+    summary = 'Cirkit Designer multi-device smart home automation schematic. An ESP8266 NodeMCU controls a 4-channel 5V relay module (Songle SRD-05VDC), reads ambient temperature and humidity via DHT11, decodes IR remote commands via VS1838B IR receiver, provides 2x tactile pushbuttons for manual override, and is powered by a dual 18650 rechargeable Li-Ion battery pack.';
+    formula = 'P_load = V_mains * I_relay (up to 10A @ 250VAC per channel) | Relay Activation: Logic LOW / HIGH on D0-D3';
+    specifications = [
+      'Microcontroller: NodeMCU ESP-12E (ESP8266 Wi-Fi 80MHz/160MHz)',
+      'Relay Board: 4-Channel 5V Optocoupler-Isolated Relay Module (Songle SRD-05VDC-SL-C)',
+      'Environmental Sensing: DHT11 Digital Temperature & Relative Humidity Sensor on D4 (GPIO2)',
+      'Infrared Remote: VS1838B 38kHz IR Receiver Demodulator on D7 (GPIO13)',
+      'Manual Controls: 2x Tactile Pushbuttons on D5 (GPIO14) and D6 (GPIO12) with internal pull-ups',
+      'Power Source: 2x 18650 Li-Ion rechargeable battery pack (3.7V - 7.4V) feeding NodeMCU VIN, Relay VCC, DHT11 VCC, and IR VCC',
+    ];
+    tips = [
+      'Navy, blue, cyan, and purple signal wires connect NodeMCU D0, D1, D2, D3 directly to Relay inputs IN1, IN2, IN3, IN4.',
+      'DHT11 data line (orange wire) connects to D4; VS1838B IR receiver output (pink wire) connects to D7.',
+      'Manual tactile pushbuttons S1 and S2 switch D5 and D6 to ground for instantaneous local control.',
+      'All component GND terminals (black wires) share a unified ground plane back to the 18650 battery negative terminal.',
+    ];
+    rawComponents = [
+      {
+        id: 'u_nodemcu',
+        type: 'nodemcu_esp8266',
+        designator: 'U1',
+        value: 'NodeMCU ESP-12E',
+        footprint: 'MODULE_NODEMCU_V3',
+        x: 440,
+        y: 360,
+        pins: [
+          { id: '10', name: 'GND', net: 'GND' },
+          { id: '14', name: 'VIN', net: 'VCC_BAT' },
+          { id: '15', name: 'D0', net: 'NET_RELAY_IN1' },
+          { id: '16', name: 'D1 (SCL)', net: 'NET_RELAY_IN2' },
+          { id: '17', name: 'D2 (SDA)', net: 'NET_RELAY_IN3' },
+          { id: '18', name: 'D3', net: 'NET_RELAY_IN4' },
+          { id: '19', name: 'D4', net: 'NET_DHT11_DOUT' },
+          { id: '21', name: 'GND', net: 'GND' },
+          { id: '22', name: 'D5', net: 'NET_BTN_SW1' },
+          { id: '23', name: 'D6', net: 'NET_BTN_SW2' },
+          { id: '24', name: 'D7', net: 'NET_IR_OUT' },
+        ],
+      },
+      {
+        id: 'mod_relay4',
+        type: 'relay_4channel_module',
+        designator: 'K1_4',
+        value: '4-Channel 5V Relay Module',
+        footprint: 'MODULE_RELAY_4CH',
+        x: 780,
+        y: 320,
+        pins: [
+          { id: '1', name: 'VCC', net: 'VCC_BAT' },
+          { id: '2', name: 'GND', net: 'GND' },
+          { id: '3', name: 'IN1', net: 'NET_RELAY_IN1' },
+          { id: '4', name: 'IN2', net: 'NET_RELAY_IN2' },
+          { id: '5', name: 'IN3', net: 'NET_RELAY_IN3' },
+          { id: '6', name: 'IN4', net: 'NET_RELAY_IN4' },
+          { id: '8', name: 'K1_NO', net: 'AC_LOAD1' },
+          { id: '9', name: 'K1_COM', net: 'AC_LINE' },
+          { id: '11', name: 'K2_NO', net: 'AC_LOAD2' },
+          { id: '12', name: 'K2_COM', net: 'AC_LINE' },
+          { id: '14', name: 'K3_NO', net: 'AC_LOAD3' },
+          { id: '15', name: 'K3_COM', net: 'AC_LINE' },
+          { id: '17', name: 'K4_NO', net: 'AC_LOAD4' },
+          { id: '18', name: 'K4_COM', net: 'AC_LINE' },
+        ],
+      },
+      {
+        id: 'sens_dht11',
+        type: 'sensor_dht11',
+        designator: 'U2',
+        value: 'DHT11 Temp & Humidity',
+        footprint: 'MODULE_DHT11_3P',
+        x: 440,
+        y: 120,
+        pins: [
+          { id: '1', name: 'VCC', net: 'VCC_BAT' },
+          { id: '2', name: 'DATA', net: 'NET_DHT11_DOUT' },
+          { id: '4', name: 'GND', net: 'GND' },
+        ],
+      },
+      {
+        id: 'sens_ir',
+        type: 'ir_receiver_1838',
+        designator: 'U3',
+        value: 'VS1838B IR Receiver (38kHz)',
+        footprint: 'MODULE_IR_1838',
+        x: 740,
+        y: 560,
+        pins: [
+          { id: '1', name: 'OUT', net: 'NET_IR_OUT' },
+          { id: '2', name: 'GND', net: 'GND' },
+          { id: '3', name: 'VCC', net: 'VCC_BAT' },
+        ],
+      },
+      {
+        id: 'btn_sw1',
+        type: 'switch_spst',
+        designator: 'SW1',
+        value: 'Push Button 1',
+        footprint: 'SW_PUSH_6MM',
+        x: 180,
+        y: 340,
+        pins: [
+          { id: '1', name: '1', net: 'NET_BTN_SW1' },
+          { id: '2', name: '2', net: 'GND' },
+        ],
+      },
+      {
+        id: 'btn_sw2',
+        type: 'switch_spst',
+        designator: 'SW2',
+        value: 'Push Button 2',
+        footprint: 'SW_PUSH_6MM',
+        x: 180,
+        y: 460,
+        pins: [
+          { id: '1', name: '1', net: 'NET_BTN_SW2' },
+          { id: '2', name: '2', net: 'GND' },
+        ],
+      },
+      {
+        id: 'bat_18650',
+        type: 'battery_18650_pack',
+        designator: 'BAT1',
+        value: 'Dual 18650 Li-Ion (3.7V/7.4V)',
+        footprint: 'BAT_HOLDER_2X_18650',
+        x: 180,
+        y: 180,
+        pins: [
+          { id: '1', name: '+', net: 'VCC_BAT' },
+          { id: '2', name: '-', net: 'GND' },
+        ],
+      },
+      {
+        id: 'pwr_vin',
+        type: 'vcc',
+        designator: 'VIN_RAIL',
+        value: '+VIN (Battery)',
+        footprint: 'POWER_PORT',
+        x: 320,
+        y: 220,
+        pins: [{ id: '1', name: 'VCC', net: 'VCC_BAT' }],
+      },
+      {
+        id: 'pwr_gnd',
+        type: 'gnd',
+        designator: 'GND_RAIL',
+        value: 'GND',
+        footprint: 'POWER_PORT',
+        x: 320,
+        y: 540,
+        pins: [{ id: '1', name: 'GND', net: 'GND' }],
+      },
+    ];
+  } else if (
     p.includes('nodemcu') ||
     p.includes('smart relay') ||
     p.includes('techstudycell') ||

@@ -2,9 +2,11 @@
 // Automatically detects copied circuit images (Copy Image), copied URLs (Copy URL / Copy Link Address),
 // and circuit descriptions, and generates complete working schematics with components and autorouted wires.
 
-import { SchematicComponent, Wire } from '../types';
+import { SchematicComponent, Wire, SchematicDocument } from '../types';
 import { synthesizeClientCircuit } from './clientEdaSynthesizer';
 import { autoRouteSchematicNets } from './autorouter';
+import { autoLayoutPcbComponents } from './pcbPlacement';
+import { learnCircuit } from './circuitBrainLearner';
 
 export interface ImportedCircuitResult {
   title: string;
@@ -118,12 +120,27 @@ export async function importCircuitFromImageDataUrl(dataUrl: string): Promise<Im
           })),
         }));
 
-        const routed = autoRouteSchematicNets(comps, []);
-        return {
+        const placedComps = autoLayoutPcbComponents(comps);
+        const routed = autoRouteSchematicNets(placedComps, []);
+
+        const resultDoc: SchematicDocument = {
+          id: `sheet_pasted_${Date.now()}`,
           title: raw.title || 'Schematic from Copied Image',
           summary: raw.summary || 'Auto-generated electronic circuit translated directly from clipboard image.',
           category: raw.category || 'Copied Image Circuit',
-          components: comps,
+          components: placedComps,
+          wires: routed.newWires,
+          version: 1,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        learnCircuit(resultDoc);
+
+        return {
+          title: resultDoc.title,
+          summary: resultDoc.summary,
+          category: resultDoc.category,
+          components: placedComps,
           wires: routed.newWires,
           sourceType: 'image',
           rawSource: dataUrl.slice(0, 100) + '...',
@@ -138,12 +155,21 @@ export async function importCircuitFromImageDataUrl(dataUrl: string): Promise<Im
 
   // Instant client-side fallback if server fails or is offline
   const fallbackDoc = synthesizeClientCircuit('electronic circuit diagram image');
+  const placedFallbackComps = autoLayoutPcbComponents(fallbackDoc.components || []);
+  const routedFallback = autoRouteSchematicNets(placedFallbackComps, []);
+  const fallbackResult: SchematicDocument = {
+    ...fallbackDoc,
+    components: placedFallbackComps,
+    wires: routedFallback.newWires,
+  };
+  learnCircuit(fallbackResult);
+
   return {
     title: fallbackDoc.title || 'Circuit from Copied Image',
     summary: fallbackDoc.summary || 'Synthesized circuit diagram components translated from image.',
     category: fallbackDoc.category,
-    components: fallbackDoc.components,
-    wires: fallbackDoc.wires,
+    components: placedFallbackComps,
+    wires: routedFallback.newWires,
     sourceType: 'image',
     rawSource: 'Clipboard Image',
   };
@@ -154,29 +180,92 @@ export async function importCircuitFromImageDataUrl(dataUrl: string): Promise<Im
  */
 export async function importCircuitFromUrlOrText(textOrUrl: string): Promise<ImportedCircuitResult> {
   const { title, prompt } = parseCircuitInfoFromUrl(textOrUrl);
+  const isImageUrl = /\.(png|jpe?g|webp|svg|gif|bmp)(\?.*)?$/i.test(textOrUrl) || textOrUrl.includes('imgur.com') || textOrUrl.includes('/images/');
 
-  // First try local client synthesizer which is lightning-fast and handles standard circuit families
-  const clientDoc = synthesizeClientCircuit(prompt, title);
-  if (clientDoc && clientDoc.components && clientDoc.components.length > 0) {
-    return {
-      title: clientDoc.title || title,
-      summary: clientDoc.summary || `Synthesized schematic from ${textOrUrl}`,
-      category: clientDoc.category,
-      components: clientDoc.components,
-      wires: clientDoc.wires,
-      sourceType: textOrUrl.startsWith('http') ? 'url' : 'text',
-      rawSource: textOrUrl,
-    };
+  // Try server-side generation with online URL / image link
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const response = await fetch('/api/circuit/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: `Generate schematic circuit from URL reference: ${prompt}`,
+        url: textOrUrl,
+        image: isImageUrl ? textOrUrl : undefined,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.circuit && data.circuit.components && data.circuit.components.length > 0) {
+        const raw = data.circuit;
+        const comps: SchematicComponent[] = (raw.components || []).map((c: any, idx: number) => ({
+          id: c.id || `comp_url_${Date.now()}_${idx}`,
+          type: c.type || 'generic_ic',
+          designator: c.designator || `U${idx + 1}`,
+          value: c.value || 'Part',
+          footprint: c.footprint || 'MODULE_STANDARD',
+          x: typeof c.x === 'number' ? c.x : 200 + (idx % 4) * 140,
+          y: typeof c.y === 'number' ? c.y : 150 + Math.floor(idx / 4) * 120,
+          rotation: (c.rotation as any) || 0,
+          pins: (c.pins || []).map((p: any) => ({
+            id: String(p.id),
+            name: p.name || String(p.id),
+            net: p.net || undefined,
+          })),
+        }));
+
+        const placedComps = autoLayoutPcbComponents(comps);
+        const routed = autoRouteSchematicNets(placedComps, []);
+
+        const doc: SchematicDocument = {
+          id: `sheet_url_${Date.now()}`,
+          title: raw.title || title,
+          summary: raw.summary || `Synthesized schematic from ${textOrUrl}`,
+          category: raw.category || 'Web Circuit',
+          components: placedComps,
+          wires: routed.newWires,
+          version: 1,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        learnCircuit(doc);
+
+        return {
+          title: doc.title,
+          summary: doc.summary,
+          category: doc.category,
+          components: placedComps,
+          wires: routed.newWires,
+          sourceType: textOrUrl.startsWith('http') ? 'url' : 'text',
+          rawSource: textOrUrl,
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('[Clipboard Importer] Server URL fetch timed out or unavailable, using client synthesizer...', e);
   }
 
-  // Fallback default circuit
-  const defaultDoc = synthesizeClientCircuit('555 timer flasher circuit');
+  // Fallback to local client EDA synthesizer (instant & zero errors)
+  const clientDoc = synthesizeClientCircuit(prompt, title);
+  const clientComps = autoLayoutPcbComponents(clientDoc.components || []);
+  const clientRouted = autoRouteSchematicNets(clientComps, []);
+  const doc: SchematicDocument = {
+    ...clientDoc,
+    components: clientComps,
+    wires: clientRouted.newWires,
+  };
+  learnCircuit(doc);
+
   return {
-    title: title || 'Web Circuit Schematic',
-    summary: `Synthesized schematic from ${textOrUrl}`,
-    category: 'Web Circuit',
-    components: defaultDoc.components,
-    wires: defaultDoc.wires,
+    title: clientDoc.title || title,
+    summary: clientDoc.summary || `Synthesized schematic from ${textOrUrl}`,
+    category: clientDoc.category,
+    components: clientComps,
+    wires: clientRouted.newWires,
     sourceType: textOrUrl.startsWith('http') ? 'url' : 'text',
     rawSource: textOrUrl,
   };

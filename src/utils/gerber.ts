@@ -14,14 +14,17 @@ export interface GerberExportOptions {
 export async function generateGerberZip(
   components: SchematicComponent[],
   wires: Wire[],
-  options: GerberExportOptions
+  options?: GerberExportOptions | string
 ): Promise<Blob> {
   const zip = new JSZip();
-  const projectName = (options.projectName || 'CircuitForge_Project').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const opts: GerberExportOptions = typeof options === 'string'
+    ? { projectName: options }
+    : (options || { projectName: 'CircuitForge_Project' });
+  const projectName = (opts.projectName || 'CircuitForge_Project').replace(/[^a-zA-Z0-9_-]/g, '_');
   const dateStr = new Date().toISOString().split('T')[0];
 
-  const boardW = options.boardWidth || 100.0; // 100mm standard
-  const boardH = options.boardHeight || 68.0;  // 68mm standard
+  const boardW = opts.boardWidth || 100.0; // 100mm standard
+  const boardH = opts.boardHeight || 68.0;  // 68mm standard
 
   // Map components to PCB locations in mm (board coordinates 0 to boardW, 0 to boardH)
   const pcbComponents = components.map((c, i) => {

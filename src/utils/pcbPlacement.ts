@@ -192,3 +192,8 @@ export function autoArrangeBestFit(
     };
   });
 }
+
+/**
+ * Backward compatibility alias for autoArrangeBestFit
+ */
+export const autoLayoutPcbComponents = autoArrangeBestFit;

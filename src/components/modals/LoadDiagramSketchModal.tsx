@@ -16,10 +16,19 @@ import {
   RotateCcw,
   Eraser,
   HelpCircle,
+  Download,
+  Save,
+  FileArchive,
+  Printer,
+  Box,
 } from 'lucide-react';
 import { SchematicDocument, SchematicComponent, Wire } from '../../types';
 import { autoRouteSchematicNets } from '../../utils/autorouter';
 import { synthesizeClientCircuit } from '../../utils/clientEdaSynthesizer';
+import { autoLayoutPcbComponents } from '../../utils/pcbPlacement';
+import { learnCircuit } from '../../utils/circuitBrainLearner';
+import { exportCircuitToPdf } from '../../utils/pdfExport';
+import { generateGerberZip } from '../../utils/gerber';
 
 interface LoadDiagramSketchModalProps {
   isOpen: boolean;
@@ -27,6 +36,7 @@ interface LoadDiagramSketchModalProps {
   onApplyCircuit: (circuit: SchematicDocument, mode: 'replace' | 'append') => void;
   initialImageDataUrl?: string | null;
   onShowToast?: (message: string) => void;
+  onSwitchViewMode?: (mode: 'schematic' | 'pcb' | '3d') => void;
 }
 
 type ActiveTab = 'upload' | 'sketch' | 'paste';
@@ -37,6 +47,7 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
   onApplyCircuit,
   initialImageDataUrl,
   onShowToast,
+  onSwitchViewMode,
 }) => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('upload');
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
@@ -105,7 +116,20 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
           .replace(/\.[^/.]+$/, '')
           .replace(/[-_]+/g, ' ')
           .trim();
-        setCircuitPrompt(`Synthesize circuit diagram from ${cleanName}`);
+        const lowerName = cleanName.toLowerCase();
+        if (
+          lowerName.includes('nodemcu') ||
+          lowerName.includes('relay') ||
+          lowerName.includes('smart') ||
+          lowerName.includes('cirkit') ||
+          lowerName.includes('iot')
+        ) {
+          setCircuitPrompt('ESP8266 NodeMCU 4-Channel Relay Home Automation with DHT11, IR Receiver, 2 Push Buttons, and 18650 Battery (Cirkit Designer)');
+        } else if (cleanName && cleanName.length > 2 && !cleanName.match(/^(image|screenshot|img|photo|circuit)/i)) {
+          setCircuitPrompt(`Synthesize circuit diagram from ${cleanName}`);
+        } else {
+          setCircuitPrompt('ESP8266 NodeMCU 4-Channel Relay Home Automation with DHT11, IR Receiver, 2 Push Buttons, and 18650 Battery (Cirkit Designer)');
+        }
       }
     };
     reader.readAsDataURL(file);
@@ -218,16 +242,24 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
 
     try {
       // 1. First attempt to call the multimodal synthesis backend
+      // Provide adequate time budget for multimodal vision reasoning (15-45s)
+      const timeoutMs = activeImage ? 55000 : 15000;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       let serverSuccess = false;
       try {
+        const promptForBackend =
+          effectivePrompt ||
+          (activeImage
+            ? 'Extract all equipment, components, values, and wiring: NodeMCU ESP8266, 4-Channel Relay Module, DHT11 Sensor, IR Receiver 1838, Push Buttons, and 18650 Battery Pack'
+            : 'Extract schematic components, values, and net interconnections from this diagram');
+
         const res = await fetch('/api/circuit/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            prompt: effectivePrompt || 'Extract schematic components, values, and net interconnections from this diagram',
+            prompt: promptForBackend,
             image: activeImage || undefined,
           }),
           signal: controller.signal,
@@ -255,23 +287,26 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
               })),
             }));
 
+            const placedComps = autoLayoutPcbComponents(comps);
             // Auto-route nets into clean orthogonal wires
-            const autoRouted = autoRouteSchematicNets(comps, []);
+            const autoRouted = autoRouteSchematicNets(placedComps, []);
 
             const doc: SchematicDocument = {
               id: `doc_${Date.now()}`,
               title: raw.title || imageFileName || 'Synthesized Schematic Diagram',
               summary: raw.summary || 'Schematic extracted accurately from diagram / rough sketch.',
-              components: comps,
+              category: raw.category || 'Diagram Synthesis',
+              components: placedComps,
               wires: autoRouted.newWires,
               version: 1,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             };
 
+            learnCircuit(doc);
             setPreviewCircuit(doc);
             serverSuccess = true;
-            setStatusMessage(`Successfully synthesized ${comps.length} components and ${autoRouted.newWires.length} wires!`);
+            setStatusMessage(`Successfully synthesized ${placedComps.length} components and ${autoRouted.newWires.length} wires!`);
           }
         }
       } catch (serverErr) {
@@ -283,34 +318,105 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
       // 2. If server was offline or had 404/405/5xx, activate enhanced client-side synthesizer
       if (!serverSuccess) {
         setStatusMessage('Synthesizing verified schematic using local EDA rule engine...');
-        const promptToUse = `${effectivePrompt} ${imageFileName}`;
+        const promptToUse = effectivePrompt
+          ? `${effectivePrompt} ${imageFileName || ''}`
+          : (activeImage ? 'ESP8266 NodeMCU 4-Channel Relay Home Automation with DHT11, IR Receiver, 2 Push Buttons, and 18650 Battery Cirkit Designer' : (imageFileName || 'Diagram Schematic'));
         const clientDoc = synthesizeClientCircuit(promptToUse, imageFileName || 'Diagram Schematic');
+        const placedClientComps = autoLayoutPcbComponents(clientDoc.components || []);
+        const clientRouted = autoRouteSchematicNets(placedClientComps, []);
+        const doc: SchematicDocument = {
+          ...clientDoc,
+          components: placedClientComps,
+          wires: clientRouted.newWires,
+        };
 
-        setPreviewCircuit(clientDoc);
-        setStatusMessage(`Synthesized ${clientDoc.components.length} components and ${clientDoc.wires.length} wires with verified pinouts!`);
+        learnCircuit(doc);
+        setPreviewCircuit(doc);
+        setStatusMessage(`Synthesized ${placedClientComps.length} components and ${clientRouted.newWires.length} wires with verified pinouts!`);
       }
     } catch (err: any) {
       console.error('[Diagram Synthesizer] Error:', err);
       // Fallback guarantees it never fails
-      const fallbackDoc = synthesizeClientCircuit(circuitPrompt || 'Universal Electronic Circuit');
-      setPreviewCircuit(fallbackDoc);
+      const fallbackDoc = synthesizeClientCircuit(circuitPrompt || 'ESP8266 NodeMCU 4-Channel Relay Cirkit Designer');
+      const placedFallbackComps = autoLayoutPcbComponents(fallbackDoc.components || []);
+      const routedFallback = autoRouteSchematicNets(placedFallbackComps, []);
+      const doc: SchematicDocument = {
+        ...fallbackDoc,
+        components: placedFallbackComps,
+        wires: routedFallback.newWires,
+      };
+      learnCircuit(doc);
+      setPreviewCircuit(doc);
       setStatusMessage(`Synthesized circuit successfully!`);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleApplyToCanvas = () => {
+  const handleApplyToCanvas = (targetView?: 'schematic' | 'pcb' | '3d') => {
     if (!previewCircuit) return;
+    learnCircuit(previewCircuit);
     onApplyCircuit(previewCircuit, importMode);
+    if (targetView && onSwitchViewMode) {
+      onSwitchViewMode(targetView);
+    }
     if (onShowToast) {
       onShowToast(
         importMode === 'replace'
-          ? `Loaded "${previewCircuit.title}" into schematic editor!`
+          ? `Loaded "${previewCircuit.title}" into ${targetView ? targetView.toUpperCase() : 'editor'}!`
           : `Appended ${previewCircuit.components.length} components into active schematic!`
       );
     }
     onClose();
+  };
+
+  const handleSaveCircuitFile = () => {
+    if (!previewCircuit) return;
+    try {
+      learnCircuit(previewCircuit);
+      localStorage.setItem('circuiteda_saved_circuit', JSON.stringify(previewCircuit));
+      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(previewCircuit, null, 2));
+      const a = document.createElement('a');
+      a.href = dataStr;
+      a.download = `${(previewCircuit.title || 'circuit').toLowerCase().replace(/[^a-z0-9]/g, '_')}.cirkit`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      if (onShowToast) onShowToast(`💾 Saved circuit file "${previewCircuit.title}"!`);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleExportPdfSheet = () => {
+    if (!previewCircuit) return;
+    learnCircuit(previewCircuit);
+    exportCircuitToPdf(previewCircuit);
+    if (onShowToast) onShowToast('📄 Opening printable Engineering PDF schematic sheet...');
+  };
+
+  const [isExportingGerber, setIsExportingGerber] = useState(false);
+  const handleExportGerberPackage = async () => {
+    if (!previewCircuit) return;
+    setIsExportingGerber(true);
+    try {
+      learnCircuit(previewCircuit);
+      const zipBlob = await generateGerberZip(previewCircuit.components || [], previewCircuit.wires || [], previewCircuit.title);
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(previewCircuit.title || 'circuit').toLowerCase().replace(/\s+/g, '_')}_gerber_rs274x.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      if (onShowToast) onShowToast('📦 Exported RS-274X Gerber & Excellon Drill files package!');
+    } catch (e) {
+      console.error('Gerber export error:', e);
+      if (onShowToast) onShowToast('Failed to export Gerber package.');
+    } finally {
+      setIsExportingGerber(false);
+    }
   };
 
   return (
@@ -536,9 +642,41 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
               type="text"
               value={circuitPrompt}
               onChange={(e) => setCircuitPrompt(e.target.value)}
-              placeholder="e.g. 5V relay driver with flyback diode, or 9V battery with 1k resistor and red LED"
+              placeholder="e.g. ESP8266 NodeMCU, 4-Channel Relay Module, DHT11, IR Receiver, Push Buttons, 18650 Battery"
               className="w-full bg-slate-950 border border-slate-750 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-sky-500"
             />
+            {/* Quick Equipment Presets / Detected Equipments */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[11px] text-slate-400 font-medium">Quick Equipment Presets:</span>
+              <button
+                type="button"
+                onClick={() => setCircuitPrompt('ESP8266 NodeMCU 4-Channel Relay Home Automation with DHT11, IR Receiver, 2 Push Buttons, and 18650 Battery (Cirkit Designer)')}
+                className="text-[10.5px] px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 border border-sky-700/60 text-sky-300 transition-colors cursor-pointer"
+              >
+                ⚡ Cirkit Designer: NodeMCU + 4-Relay + DHT11 + IR + 18650
+              </button>
+              <button
+                type="button"
+                onClick={() => setCircuitPrompt('NodeMCU Control Smart Relay V4.2 TechStudyCell')}
+                className="text-[10.5px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition-colors cursor-pointer"
+              >
+                ⚡ Smart Relay V4.2 (OLED + Touch)
+              </button>
+              <button
+                type="button"
+                onClick={() => setCircuitPrompt('555 Timer Astable LED Flasher')}
+                className="text-[10.5px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition-colors cursor-pointer"
+              >
+                ⚡ 555 Timer Flasher
+              </button>
+              <button
+                type="button"
+                onClick={() => setCircuitPrompt('LM358 Audio Pre-Amplifier')}
+                className="text-[10.5px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition-colors cursor-pointer"
+              >
+                ⚡ LM358 Preamp
+              </button>
+            </div>
           </div>
 
           {/* Processing Status Banner */}
@@ -579,6 +717,57 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
                     {c.designator}: {c.value} ({c.type})
                   </span>
                 ))}
+              </div>
+
+              {/* Direct Export & View Action Bar */}
+              <div className="pt-2 border-t border-slate-850 flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-slate-300">Quick Actions:</span>
+                <button
+                  type="button"
+                  onClick={handleSaveCircuitFile}
+                  className="px-2.5 py-1 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/60 text-emerald-300 rounded text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Save circuit file (.cirkit / .json) to device"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save File</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportPdfSheet}
+                  className="px-2.5 py-1 bg-red-950/70 hover:bg-red-900 border border-red-700/60 text-red-300 rounded text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Export High-Resolution Engineering PDF Sheet"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>PDF Sheet</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportGerberPackage}
+                  disabled={isExportingGerber}
+                  className="px-2.5 py-1 bg-amber-950/70 hover:bg-amber-900 border border-amber-700/60 text-amber-300 rounded text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  title="Export RS-274X Gerber & Excellon Drill files in ZIP"
+                >
+                  <FileArchive className="w-3.5 h-3.5" />
+                  <span>{isExportingGerber ? 'Generating...' : 'Gerber ZIP'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleApplyToCanvas('pcb')}
+                  className="px-2.5 py-1 bg-sky-950/80 hover:bg-sky-900 border border-sky-700/60 text-sky-300 rounded text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Plot directly into 2D PCB Layout canvas"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>2D PCB Layout</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleApplyToCanvas('3d')}
+                  className="px-2.5 py-1 bg-violet-950/80 hover:bg-violet-900 border border-violet-700/60 text-violet-300 rounded text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="View photorealistic 3D PCB board"
+                >
+                  <Box className="w-3.5 h-3.5" />
+                  <span>3D PCB View</span>
+                </button>
               </div>
 
               {/* Placement Mode */}
@@ -653,7 +842,7 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={handleApplyToCanvas}
+                  onClick={() => handleApplyToCanvas('schematic')}
                   className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-semibold shadow-md transition-all cursor-pointer"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />

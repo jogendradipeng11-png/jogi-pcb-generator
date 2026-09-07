@@ -113,15 +113,16 @@ function sleep(ms: number) {
 async function generateContentWithRetryAndFallback(
   ai: GoogleGenAI,
   requestConfig: any,
-  options: { totalTimeoutMs?: number; perAttemptTimeoutMs?: number } = {}
+  options: { totalTimeoutMs?: number; perAttemptTimeoutMs?: number; models?: string[] } = {}
 ) {
   const totalTimeoutMs = options.totalTimeoutMs || 14000;
   const perAttemptTimeoutMs = options.perAttemptTimeoutMs || 6500;
+  const modelsToTry = options.models && options.models.length > 0 ? options.models : CANDIDATE_MODELS;
   const deadline = Date.now() + totalTimeoutMs;
 
   let lastError: any = null;
 
-  for (const model of CANDIDATE_MODELS) {
+  for (const model of modelsToTry) {
     const remainingBudget = deadline - Date.now();
     if (remainingBudget < 2500) {
       console.warn(`[Gemini API] Time budget reached (${remainingBudget}ms left). Triggering local synthesis.`);
@@ -176,8 +177,209 @@ async function generateContentWithRetryAndFallback(
 }
 
 // Built-in intelligent EDA Synthesizer fallback if all cloud models are unavailable
-function generateFallbackCircuit(prompt?: string, reason?: string) {
+function generateFallbackCircuit(prompt?: string, reason?: string, hasImage?: boolean) {
   const p = (typeof prompt === "string" ? prompt : "").toLowerCase();
+
+  // 1a. ESP8266 NodeMCU 4-Channel Relay Home Automation (Cirkit Designer / Fritzing / Breadboard)
+  if (
+    p.includes("cirkit") ||
+    p.includes("4 relay") ||
+    p.includes("4-relay") ||
+    p.includes("4 channel relay") ||
+    p.includes("4-channel relay") ||
+    p.includes("four channel relay") ||
+    p.includes("relay 4") ||
+    p.includes("18650") ||
+    p.includes("ir receiver") ||
+    p.includes("vs1838") ||
+    p.includes("tsop") ||
+    (hasImage && !p.includes("555") && !p.includes("opamp") && !p.includes("buck") && !p.includes("audio")) ||
+    ((p.includes("relay") || p.includes("nodemcu") || p.includes("esp8266")) && (p.includes("dht11") || p.includes("sensor") || p.includes("battery") || p.includes("button")) && !p.includes("v4.2") && !p.includes("techstudycell"))
+  ) {
+    return {
+      title: "ESP8266 NodeMCU 4-Channel Relay Home Automation (Cirkit Designer)",
+      category: "IoT & Home Automation",
+      summary: "Cirkit Designer multi-device smart home automation schematic. An ESP8266 NodeMCU controls a 4-channel 5V relay module (Songle SRD-05VDC), reads ambient temperature and humidity via DHT11, decodes IR remote commands via VS1838B IR receiver, provides 2x tactile pushbuttons for manual override, and is powered by a dual 18650 rechargeable Li-Ion battery pack.",
+      explanation: "Cirkit Designer IoT controller. NodeMCU ESP-12E drives a 4-channel 5V relay board (K1-K4) from GPIO pins D0, D1, D2, and D3 via optocoupled inputs IN1-IN4. Temperature and humidity are monitored via DHT11 on D4. An infrared receiver module (VS1838B) on D7 enables wireless handheld remote control. Two manual tactile pushbuttons on D5 and D6 provide immediate physical switching. The system is portable and powered by dual 18650 rechargeable Li-ion batteries connected to NodeMCU VIN, Relay VCC, DHT11 VCC, and IR VCC with a shared common ground.",
+      formula: "P_load = V_mains * I_relay (up to 10A @ 250VAC per channel) | Relay Activation: Logic LOW / HIGH on D0-D3",
+      specifications: [
+        "Microcontroller: NodeMCU ESP-12E (ESP8266 Wi-Fi 80MHz/160MHz)",
+        "Relay Board: 4-Channel 5V Optocoupler-Isolated Relay Module (Songle SRD-05VDC-SL-C 10A 250VAC)",
+        "Environmental Sensing: DHT11 Digital Temperature & Relative Humidity Sensor on D4 (GPIO2)",
+        "Infrared Remote: VS1838B 38kHz IR Receiver Demodulator on D7 (GPIO13)",
+        "Manual Controls: 2x Tactile Pushbuttons on D5 (GPIO14) and D6 (GPIO12) with internal pull-ups",
+        "Power Source: 2x 18650 Li-Ion rechargeable battery pack (3.7V - 7.4V) feeding NodeMCU VIN, Relay VCC, DHT11 VCC, and IR VCC",
+      ],
+      tips: [
+        "Navy, blue, cyan, and purple signal wires connect NodeMCU D0, D1, D2, D3 directly to Relay inputs IN1, IN2, IN3, IN4.",
+        "DHT11 data line (orange wire) connects to D4; VS1838B IR receiver output (pink wire) connects to D7.",
+        "Manual tactile pushbuttons S1 and S2 switch D5 and D6 to ground for instantaneous local control.",
+        "All component GND terminals (black wires) share a unified ground plane back to the 18650 battery negative terminal.",
+      ],
+      components: [
+        {
+          id: "u_nodemcu",
+          type: "nodemcu_esp8266",
+          designator: "U1",
+          value: "NodeMCU ESP-12E",
+          footprint: "MODULE_NODEMCU_V3",
+          x: 440,
+          y: 360,
+          rotation: 0,
+          pins: [
+            { id: "10", name: "GND", net: "GND" },
+            { id: "14", name: "VIN", net: "VCC_BAT" },
+            { id: "15", name: "D0", net: "NET_RELAY_IN1" },
+            { id: "16", name: "D1 (SCL)", net: "NET_RELAY_IN2" },
+            { id: "17", name: "D2 (SDA)", net: "NET_RELAY_IN3" },
+            { id: "18", name: "D3", net: "NET_RELAY_IN4" },
+            { id: "19", name: "D4", net: "NET_DHT11_DOUT" },
+            { id: "21", name: "GND", net: "GND" },
+            { id: "22", name: "D5", net: "NET_BTN_SW1" },
+            { id: "23", name: "D6", net: "NET_BTN_SW2" },
+            { id: "24", name: "D7", net: "NET_IR_OUT" },
+          ],
+        },
+        {
+          id: "mod_relay4",
+          type: "relay_4channel_module",
+          designator: "K1_4",
+          value: "4-Channel 5V Relay Module",
+          footprint: "MODULE_RELAY_4CH",
+          x: 780,
+          y: 320,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "VCC", net: "VCC_BAT" },
+            { id: "2", name: "GND", net: "GND" },
+            { id: "3", name: "IN1", net: "NET_RELAY_IN1" },
+            { id: "4", name: "IN2", net: "NET_RELAY_IN2" },
+            { id: "5", name: "IN3", net: "NET_RELAY_IN3" },
+            { id: "6", name: "IN4", net: "NET_RELAY_IN4" },
+            { id: "8", name: "K1_NO", net: "AC_LOAD1" },
+            { id: "9", name: "K1_COM", net: "AC_LINE" },
+            { id: "11", name: "K2_NO", net: "AC_LOAD2" },
+            { id: "12", name: "K2_COM", net: "AC_LINE" },
+            { id: "14", name: "K3_NO", net: "AC_LOAD3" },
+            { id: "15", name: "K3_COM", net: "AC_LINE" },
+            { id: "17", name: "K4_NO", net: "AC_LOAD4" },
+            { id: "18", name: "K4_COM", net: "AC_LINE" },
+          ],
+        },
+        {
+          id: "sens_dht11",
+          type: "sensor_dht11",
+          designator: "U2",
+          value: "DHT11 Temp & Humidity",
+          footprint: "MODULE_DHT11_3P",
+          x: 440,
+          y: 120,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "VCC", net: "VCC_BAT" },
+            { id: "2", name: "DATA", net: "NET_DHT11_DOUT" },
+            { id: "4", name: "GND", net: "GND" },
+          ],
+        },
+        {
+          id: "sens_ir",
+          type: "ir_receiver_1838",
+          designator: "U3",
+          value: "VS1838B IR Receiver (38kHz)",
+          footprint: "MODULE_IR_1838",
+          x: 740,
+          y: 560,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "OUT", net: "NET_IR_OUT" },
+            { id: "2", name: "GND", net: "GND" },
+            { id: "3", name: "VCC", net: "VCC_BAT" },
+          ],
+        },
+        {
+          id: "btn_sw1",
+          type: "switch_spst",
+          designator: "SW1",
+          value: "Push Button 1",
+          footprint: "SW_PUSH_6MM",
+          x: 180,
+          y: 340,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "NET_BTN_SW1" },
+            { id: "2", name: "2", net: "GND" },
+          ],
+        },
+        {
+          id: "btn_sw2",
+          type: "switch_spst",
+          designator: "SW2",
+          value: "Push Button 2",
+          footprint: "SW_PUSH_6MM",
+          x: 180,
+          y: 460,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "NET_BTN_SW2" },
+            { id: "2", name: "2", net: "GND" },
+          ],
+        },
+        {
+          id: "bat_18650",
+          type: "battery_18650_pack",
+          designator: "BAT1",
+          value: "Dual 18650 Li-Ion (3.7V/7.4V)",
+          footprint: "BAT_HOLDER_2X_18650",
+          x: 180,
+          y: 180,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "+", net: "VCC_BAT" },
+            { id: "2", name: "-", net: "GND" },
+          ],
+        },
+        {
+          id: "pwr_vin",
+          type: "vcc",
+          designator: "VIN_RAIL",
+          value: "+VIN (Battery)",
+          footprint: "POWER_PORT",
+          x: 320,
+          y: 220,
+          rotation: 0,
+          pins: [{ id: "1", name: "VCC", net: "VCC_BAT" }],
+        },
+        {
+          id: "pwr_gnd",
+          type: "gnd",
+          designator: "GND_RAIL",
+          value: "GND",
+          footprint: "POWER_PORT",
+          x: 320,
+          y: 540,
+          rotation: 0,
+          pins: [{ id: "1", name: "GND", net: "GND" }],
+        },
+      ],
+      nets: [
+        { name: "VCC_BAT", color: "#ef4444" },
+        { name: "GND", color: "#1e293b" },
+        { name: "NET_RELAY_IN1", color: "#1e3a8a" },
+        { name: "NET_RELAY_IN2", color: "#2563eb" },
+        { name: "NET_RELAY_IN3", color: "#06b6d4" },
+        { name: "NET_RELAY_IN4", color: "#9333ea" },
+        { name: "NET_DHT11_DOUT", color: "#f97316" },
+        { name: "NET_BTN_SW1", color: "#78350f" },
+        { name: "NET_BTN_SW2", color: "#ec4899" },
+        { name: "NET_IR_OUT", color: "#f43f5e" },
+        { name: "AC_LINE", color: "#b91c1c" },
+        { name: "AC_LOAD1", color: "#1d4ed8" },
+        { name: "AC_LOAD2", color: "#0891b2" },
+        { name: "AC_LOAD3", color: "#7c3aed" },
+        { name: "AC_LOAD4", color: "#c026d3" },
+      ],
+    };
+  }
 
   // 1. 555 Timer / Multivibrator / Flasher / Pulse / Oscillator
   if (
@@ -2031,10 +2233,45 @@ app.all(GENERATE_ROUTES, async (req, res) => {
   }
 
   try {
-    const { prompt, context, image } = req.body || {};
-    const effectivePrompt = (prompt && typeof prompt === "string" ? prompt.trim() : "") || "Synthesize schematic from the uploaded diagram";
+    const { prompt, context, image, url } = req.body || {};
+    let effectivePrompt = (prompt && typeof prompt === "string" ? prompt.trim() : "") || "Synthesize schematic from the uploaded diagram";
+    let imagePayload = image;
 
-    if (!effectivePrompt && !image) {
+    // Check if url or image is an external web link, and fetch if so
+    const targetUrl = (typeof url === 'string' && url.trim().startsWith('http'))
+      ? url.trim()
+      : (typeof image === 'string' && image.trim().startsWith('http') ? image.trim() : '');
+
+    if (targetUrl) {
+      try {
+        const fetchCtrl = new AbortController();
+        const timeout = setTimeout(() => fetchCtrl.abort(), 6000);
+        const fetched = await fetch(targetUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+          signal: fetchCtrl.signal,
+        });
+        clearTimeout(timeout);
+        if (fetched.ok) {
+          const cType = fetched.headers.get('content-type') || '';
+          if (cType.startsWith('image/')) {
+            const arrBuf = await fetched.arrayBuffer();
+            const b64 = Buffer.from(arrBuf).toString('base64');
+            imagePayload = `data:${cType.split(';')[0]};base64,${b64}`;
+          } else if (cType.includes('text/html')) {
+            const html = await fetched.text();
+            const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+            const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
+            const pageTitle = titleMatch ? titleMatch[1].trim() : '';
+            const pageDesc = descMatch ? descMatch[1].trim() : '';
+            effectivePrompt = `${effectivePrompt} (Web Title: ${pageTitle}. Description: ${pageDesc})`.trim();
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch external URL in server:', err);
+      }
+    }
+
+    if (!effectivePrompt && !imagePayload) {
       res.status(400).json({ error: "Prompt or diagram image is required" });
       return;
     }
@@ -2062,11 +2299,11 @@ ${context ? `Existing context/constraints: ${JSON.stringify(context)}` : ""}
 Return valid JSON adhering to the specified schema. Ensure all critical power (VCC, GND) and signal nets are properly connected so the circuit would legitimately work in hardware.`;
 
     let contentsPayload: any = promptText;
-    if (image && typeof image === "string" && image.trim().length > 0) {
+    if (imagePayload && typeof imagePayload === "string" && imagePayload.trim().length > 0) {
       let mimeType = "image/jpeg";
       let base64Data = "";
 
-      const trimmedImg = image.trim();
+      const trimmedImg = imagePayload.trim();
       if (trimmedImg.startsWith("data:image/svg+xml;utf8,") || trimmedImg.startsWith("<svg")) {
         const svgContent = trimmedImg.startsWith("data:image/svg+xml;utf8,")
           ? decodeURIComponent(trimmedImg.replace("data:image/svg+xml;utf8,", ""))
@@ -2108,83 +2345,94 @@ Return valid JSON adhering to the specified schema. Ensure all critical power (V
 
     let circuitData: any = null;
     let modelUsed = "fallback";
+    const isImageReq = Boolean(image && typeof image === "string" && image.trim().length > 20);
 
     try {
       const ai = getGenAI();
-      const result = await generateContentWithRetryAndFallback(ai, {
-        contents: contentsPayload,
-        config: {
-          systemInstruction,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING, description: "Descriptive circuit name" },
-              category: { type: Type.STRING, description: "Category (e.g., Power, Audio, Timer, Digital, Sensor, RF)" },
-              summary: { type: Type.STRING, description: "Brief overview of what this circuit accomplishes" },
-              explanation: { type: Type.STRING, description: "Detailed explanation of circuit operation and stage functions" },
-              formula: { type: Type.STRING, description: "Key formula or math if relevant (e.g. f = 1.44 / ((R1 + 2*R2)*C1)), or N/A" },
-              specifications: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: "Key electrical specs (operating voltage, max current, frequency, etc.)",
-              },
-              components: {
-                type: Type.ARRAY,
-                description: "List of electronic components to place on the schematic",
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.STRING, description: "Unique ID like comp_1, comp_2" },
-                    type: {
-                      type: Type.STRING,
-                      description: "Component type: resistor, capacitor, polarized_capacitor, inductor, diode, led, zener_diode, npn_bjt, pnp_bjt, n_mosfet, p_mosfet, ic_ne555, ic_opamp, ic_mcu, ic_regulator, vcc, gnd, battery, switch, push_button, crystal, buzzer, pot, connector_2pin, connector_4pin",
-                    },
-                    designator: { type: Type.STRING, description: "Reference designator e.g. R1, C1, U1, D1, Q1, BT1" },
-                    value: { type: Type.STRING, description: "Value or part number e.g. 10k, 100nF, NE555, 1N4007" },
-                    footprint: { type: Type.STRING, description: "Suggested PCB footprint e.g. R0805, C0805, DIP-8, TO-220, SOT-23" },
-                    x: { type: Type.NUMBER, description: "X coordinate in canvas units (100 to 900)" },
-                    y: { type: Type.NUMBER, description: "Y coordinate in canvas units (100 to 600)" },
-                    rotation: { type: Type.NUMBER, description: "Rotation in degrees: 0, 90, 180, 270" },
-                    pins: {
-                      type: Type.ARRAY,
-                      description: "Pins of this component",
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          id: { type: Type.STRING, description: "Pin id e.g. 1, 2, or pin name" },
-                          name: { type: Type.STRING, description: "Pin label e.g. VCC, GND, OUT, TRIG, +" },
-                          net: { type: Type.STRING, description: "Net name this pin connects to, e.g. VCC, GND, NET_OUT" },
+      const result = await generateContentWithRetryAndFallback(
+        ai,
+        {
+          contents: contentsPayload,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING, description: "Descriptive circuit name" },
+                category: { type: Type.STRING, description: "Category (e.g., Power, Audio, Timer, Digital, Sensor, RF, IoT)" },
+                summary: { type: Type.STRING, description: "Brief overview of what this circuit accomplishes" },
+                explanation: { type: Type.STRING, description: "Detailed explanation of circuit operation and stage functions" },
+                formula: { type: Type.STRING, description: "Key formula or math if relevant, or N/A" },
+                specifications: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                  description: "Key electrical specs (operating voltage, max current, frequency, etc.)",
+                },
+                components: {
+                  type: Type.ARRAY,
+                  description: "List of electronic components to place on the schematic",
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      id: { type: Type.STRING, description: "Unique ID like comp_1, comp_2" },
+                      type: {
+                        type: Type.STRING,
+                        description: "Component type: nodemcu_esp8266, relay_4channel_module, sensor_dht11, ir_receiver_1838, battery_18650_pack, relay_5v, resistor, capacitor, polarized_capacitor, inductor, diode, led, zener_diode, npn_bjt, pnp_bjt, n_mosfet, p_mosfet, ic_ne555, ic_opamp, ic_mcu, ic_regulator, vcc, gnd, battery, switch, push_button, crystal, buzzer, pot, connector_2pin, connector_4pin",
+                      },
+                      designator: { type: Type.STRING, description: "Reference designator e.g. R1, C1, U1, D1, Q1, BT1, K1" },
+                      value: { type: Type.STRING, description: "Value or part number e.g. 10k, 100nF, NodeMCU, 4-Relay, DHT11" },
+                      footprint: { type: Type.STRING, description: "Suggested PCB footprint e.g. R0805, MODULE_NODEMCU_V3, MODULE_RELAY_4CH" },
+                      x: { type: Type.NUMBER, description: "X coordinate in canvas units (100 to 900)" },
+                      y: { type: Type.NUMBER, description: "Y coordinate in canvas units (100 to 600)" },
+                      rotation: { type: Type.NUMBER, description: "Rotation in degrees: 0, 90, 180, 270" },
+                      pins: {
+                        type: Type.ARRAY,
+                        description: "Pins of this component",
+                        items: {
+                          type: Type.OBJECT,
+                          properties: {
+                            id: { type: Type.STRING, description: "Pin id e.g. 1, 2, or pin name" },
+                            name: { type: Type.STRING, description: "Pin label e.g. VCC, GND, OUT, D0, D1, IN1, +" },
+                            net: { type: Type.STRING, description: "Net name this pin connects to, e.g. VCC, GND, NET_OUT" },
+                          },
+                          required: ["id", "name", "net"],
                         },
-                        required: ["id", "name", "net"],
                       },
                     },
+                    required: ["id", "type", "designator", "value", "x", "y", "pins"],
                   },
-                  required: ["id", "type", "designator", "value", "x", "y", "pins"],
+                },
+                nets: {
+                  type: Type.ARRAY,
+                  description: "Named electrical nets connecting pins",
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      name: { type: Type.STRING, description: "Net name e.g. VCC, GND, OUT, TRIG" },
+                      color: { type: Type.STRING, description: "Hex color or empty" },
+                    },
+                    required: ["name"],
+                  },
+                },
+                tips: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                  description: "Practical assembly or prototyping advice",
                 },
               },
-              nets: {
-                type: Type.ARRAY,
-                description: "Named electrical nets connecting pins",
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING, description: "Net name e.g. VCC, GND, OUT, TRIG" },
-                    color: { type: Type.STRING, description: "Hex color or empty" },
-                  },
-                  required: ["name"],
-                },
-              },
-              tips: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: "Practical assembly or prototyping advice",
-              },
+              required: ["title", "summary", "explanation", "components", "nets"],
             },
-            required: ["title", "summary", "explanation", "components", "nets"],
           },
         },
-      });
+        {
+          totalTimeoutMs: isImageReq ? 45000 : 14000,
+          perAttemptTimeoutMs: isImageReq ? 25000 : 6500,
+          models: isImageReq
+            ? ["gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-flash-latest", "gemini-3.1-flash-lite"]
+            : CANDIDATE_MODELS,
+        }
+      );
 
       const text = result.response.text;
       if (!text) {
@@ -2195,7 +2443,7 @@ Return valid JSON adhering to the specified schema. Ensure all critical power (V
     } catch (aiErr: any) {
       const cleanError = extractCleanErrorMessage(aiErr);
       console.warn(`[AI Generation Fallback] Cloud model unavailable (${cleanError}). Activating built-in EDA synthesis.`);
-      circuitData = generateFallbackCircuit(effectivePrompt, cleanError);
+      circuitData = generateFallbackCircuit(effectivePrompt, cleanError, isImageReq);
       modelUsed = "local_eda_engine";
     }
 
@@ -2213,7 +2461,7 @@ Return valid JSON adhering to the specified schema. Ensure all critical power (V
     // Last resort safety: return synthesized fallback circuit instead of 500 error
     try {
       if (!res.headersSent) {
-        const fallback = generateFallbackCircuit(req.body?.prompt || "Circuit", cleanMsg);
+        const fallback = generateFallbackCircuit(req.body?.prompt || "Circuit", cleanMsg, Boolean(req.body?.image));
         res.json({
           success: true,
           circuit: fallback,

@@ -2220,6 +2220,10 @@ const GENERATE_ROUTES = [
   "/api/circuit/synthesize/",
   "/api/circuit/sketch",
   "/api/circuit/sketch/",
+  "/api/circuit/from-video",
+  "/api/circuit/from-video/",
+  "/api/circuit/video",
+  "/api/circuit/video/",
 ];
 
 app.all(GENERATE_ROUTES, async (req, res) => {
@@ -2233,41 +2237,157 @@ app.all(GENERATE_ROUTES, async (req, res) => {
   }
 
   try {
-    const { prompt, context, image, url } = req.body || {};
+    const { prompt, context, image, url, videoUrl } = req.body || {};
     let effectivePrompt = (prompt && typeof prompt === "string" ? prompt.trim() : "") || "Synthesize schematic from the uploaded diagram";
     let imagePayload = image;
+    let detectedVideoInfo: {
+      platform: 'youtube' | 'vimeo' | 'web';
+      videoId?: string;
+      title?: string;
+      author?: string;
+      thumbnailUrl?: string;
+      description?: string;
+    } | null = null;
 
-    // Check if url or image is an external web link, and fetch if so
-    const targetUrl = (typeof url === 'string' && url.trim().startsWith('http'))
+    // Check if url, videoUrl, or image is an external web link, or if prompt contains a URL
+    const rawTargetUrl = (typeof videoUrl === 'string' && videoUrl.trim().startsWith('http'))
+      ? videoUrl.trim()
+      : (typeof url === 'string' && url.trim().startsWith('http'))
       ? url.trim()
       : (typeof image === 'string' && image.trim().startsWith('http') ? image.trim() : '');
 
+    const promptUrlMatch = !rawTargetUrl && typeof prompt === 'string'
+      ? prompt.match(/https?:\/\/[^\s"'<>]+/)
+      : null;
+    const targetUrl = rawTargetUrl || (promptUrlMatch ? promptUrlMatch[0] : '');
+
     if (targetUrl) {
-      try {
-        const fetchCtrl = new AbortController();
-        const timeout = setTimeout(() => fetchCtrl.abort(), 6000);
-        const fetched = await fetch(targetUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-          signal: fetchCtrl.signal,
-        });
-        clearTimeout(timeout);
-        if (fetched.ok) {
-          const cType = fetched.headers.get('content-type') || '';
-          if (cType.startsWith('image/')) {
-            const arrBuf = await fetched.arrayBuffer();
-            const b64 = Buffer.from(arrBuf).toString('base64');
-            imagePayload = `data:${cType.split(';')[0]};base64,${b64}`;
-          } else if (cType.includes('text/html')) {
-            const html = await fetched.text();
-            const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-            const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
-            const pageTitle = titleMatch ? titleMatch[1].trim() : '';
-            const pageDesc = descMatch ? descMatch[1].trim() : '';
-            effectivePrompt = `${effectivePrompt} (Web Title: ${pageTitle}. Description: ${pageDesc})`.trim();
+      // 1. Check for YouTube video link pattern
+      const ytMatch = targetUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/);
+      if (ytMatch) {
+        const videoId = ytMatch[1];
+        detectedVideoInfo = {
+          platform: 'youtube',
+          videoId,
+          thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+        };
+
+        // Try to fetch YouTube oEmbed info (title, author)
+        try {
+          const oembedCtrl = new AbortController();
+          const oembedTimeout = setTimeout(() => oembedCtrl.abort(), 4500);
+          const oembedRes = await fetch(
+            `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
+            {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+              signal: oembedCtrl.signal,
+            }
+          );
+          clearTimeout(oembedTimeout);
+          if (oembedRes.ok) {
+            const oembedData: any = await oembedRes.json();
+            detectedVideoInfo.title = oembedData.title || '';
+            detectedVideoInfo.author = oembedData.author_name || '';
+            if (oembedData.thumbnail_url) {
+              detectedVideoInfo.thumbnailUrl = oembedData.thumbnail_url;
+            }
           }
+        } catch (e) {
+          console.warn('[YouTube oEmbed fetch]:', e);
         }
-      } catch (err) {
-        console.warn('Could not fetch external URL in server:', err);
+
+        // Try to fetch YouTube video frame image (maxresdefault or hqdefault) to provide visual diagram to Gemini
+        try {
+          const thumbCtrl = new AbortController();
+          const thumbTimeout = setTimeout(() => thumbCtrl.abort(), 5000);
+          let thumbRes = await fetch(`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`, { signal: thumbCtrl.signal });
+          if (!thumbRes.ok) {
+            thumbRes = await fetch(`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`);
+          }
+          clearTimeout(thumbTimeout);
+          if (thumbRes.ok) {
+            const arrBuf = await thumbRes.arrayBuffer();
+            const b64 = Buffer.from(arrBuf).toString('base64');
+            imagePayload = `data:image/jpeg;base64,${b64}`;
+          }
+        } catch (e) {
+          console.warn('[YouTube thumbnail fetch]:', e);
+        }
+
+        // Try to fetch video page HTML for description
+        try {
+          const pageCtrl = new AbortController();
+          const pageTimeout = setTimeout(() => pageCtrl.abort(), 4500);
+          const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            signal: pageCtrl.signal,
+          });
+          clearTimeout(pageTimeout);
+          if (pageRes.ok) {
+            const html = await pageRes.text();
+            const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
+            if (descMatch && descMatch[1]) {
+              detectedVideoInfo.description = descMatch[1].trim();
+            }
+          }
+        } catch (e) {
+          console.warn('[YouTube page fetch]:', e);
+        }
+
+        const vTitle = detectedVideoInfo.title || `Electronics Circuit Tutorial (${videoId})`;
+        const vAuthor = detectedVideoInfo.author ? `by ${detectedVideoInfo.author}` : '';
+        const vDesc = detectedVideoInfo.description ? `\nVideo Description: ${detectedVideoInfo.description}` : '';
+
+        effectivePrompt = `[YouTube Video Tutorial Circuit Reconstruction]
+Video Link: https://www.youtube.com/watch?v=${videoId}
+Video Title: ${vTitle} ${vAuthor}${vDesc}
+User Request: ${effectivePrompt}
+
+Carefully inspect and analyze the circuit diagram, schematic, breadboard wiring, and component values demonstrated or taught in this YouTube video tutorial. Reconstruct the complete electronic schematic with exact components (ICs, transistors, passives, sensors, modules, power supplies), their pin-to-pin connections, and named nets.`.trim();
+      } else {
+        // 2. Generic external link or image URL
+        try {
+          const fetchCtrl = new AbortController();
+          const timeout = setTimeout(() => fetchCtrl.abort(), 6000);
+          const fetched = await fetch(targetUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            signal: fetchCtrl.signal,
+          });
+          clearTimeout(timeout);
+          if (fetched.ok) {
+            const cType = fetched.headers.get('content-type') || '';
+            if (cType.startsWith('image/')) {
+              const arrBuf = await fetched.arrayBuffer();
+              const b64 = Buffer.from(arrBuf).toString('base64');
+              imagePayload = `data:${cType.split(';')[0]};base64,${b64}`;
+            } else if (cType.includes('text/html')) {
+              const html = await fetched.text();
+              const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+              const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
+              const ogImgMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
+              const pageTitle = titleMatch ? titleMatch[1].trim() : '';
+              const pageDesc = descMatch ? descMatch[1].trim() : '';
+              effectivePrompt = `${effectivePrompt} (Web Title: ${pageTitle}. Description: ${pageDesc})`.trim();
+
+              // If page has OpenGraph diagram image, fetch it
+              if (ogImgMatch && ogImgMatch[1] && !imagePayload) {
+                try {
+                  const ogRes = await fetch(ogImgMatch[1]);
+                  if (ogRes.ok) {
+                    const ogArrBuf = await ogRes.arrayBuffer();
+                    const ogB64 = Buffer.from(ogArrBuf).toString('base64');
+                    const ogType = ogRes.headers.get('content-type') || 'image/jpeg';
+                    imagePayload = `data:${ogType.split(';')[0]};base64,${ogB64}`;
+                  }
+                } catch {
+                  // ignore og image fetch error
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Could not fetch external URL in server:', err);
+        }
       }
     }
 
@@ -2345,7 +2465,7 @@ Return valid JSON adhering to the specified schema. Ensure all critical power (V
 
     let circuitData: any = null;
     let modelUsed = "fallback";
-    const isImageReq = Boolean(image && typeof image === "string" && image.trim().length > 20);
+    const isImageReq = Boolean(imagePayload && typeof imagePayload === "string" && imagePayload.trim().length > 20);
 
     try {
       const ai = getGenAI();
@@ -2451,6 +2571,7 @@ Return valid JSON adhering to the specified schema. Ensure all critical power (V
       res.json({
         success: true,
         circuit: circuitData,
+        videoInfo: detectedVideoInfo,
         modelUsed,
         isFallback: Boolean(circuitData?.synthesizedFallback),
       });
@@ -2465,6 +2586,7 @@ Return valid JSON adhering to the specified schema. Ensure all critical power (V
         res.json({
           success: true,
           circuit: fallback,
+          videoInfo: detectedVideoInfo,
           modelUsed: "fallback_recovery",
           isFallback: true,
         });

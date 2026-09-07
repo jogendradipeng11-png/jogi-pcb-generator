@@ -32,6 +32,17 @@ export function parseCircuitInfoFromUrl(urlStr: string): { title: string; prompt
     pathname = parsed.pathname;
     queryParams = parsed.search;
 
+    // If YouTube video link e.g. youtube.com/watch?v=... or youtu.be/...
+    const ytMatch = trimmed.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/);
+    if (ytMatch) {
+      const videoId = ytMatch[1];
+      return {
+        title: `YouTube Electronics Video (${videoId})`,
+        prompt: `YouTube video tutorial circuit: ${trimmed}. Extract complete circuit schematic diagram with all components and pinout nets.`,
+        isCircuitUrl: true,
+      };
+    }
+
     // If Google search URL e.g. google.com/search?q=555+timer+circuit
     if (parsed.hostname.includes('google.') && parsed.searchParams.has('q')) {
       const q = parsed.searchParams.get('q') || '';

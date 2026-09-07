@@ -14,6 +14,7 @@ import { ComponentGlyph } from './ComponentGlyph';
 import { TransientProbeWidget } from '../simulation/TransientProbeWidget';
 import { CircuitRotationToolbar } from './CircuitRotationToolbar';
 import { rotateCircuit } from '../../utils/circuitTransform';
+import { SchematicContextMenu, ContextMenuTarget } from './SchematicContextMenu';
 import {
   Radio,
   AlignLeft,
@@ -79,6 +80,13 @@ interface SchematicCanvasProps {
   onUpdateComponentSettings?: (compId: string, settings: Partial<ComponentTestSettings>) => void;
   onToolChange?: (tool: EditorTool) => void;
   onPasteFromClipboard?: () => void;
+  onOpenLoadDiagram?: () => void;
+  onOpenChatDrawer?: () => void;
+  onOpenAutoCorrect?: () => void;
+  onOpenPinoutModal?: (comp: SchematicComponent) => void;
+  onClearCanvas?: () => void;
+  onShowToast?: (msg: string) => void;
+  onZoomFit?: () => void;
 }
 
 export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
@@ -98,6 +106,7 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
   onFinishPlacingComponent,
   onPanChange,
   onZoomChange,
+  onZoomFit,
   simulationState,
   isSimulating = false,
   onToggleProbeNet,
@@ -106,8 +115,21 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
   onUpdateComponentSettings,
   onToolChange,
   onPasteFromClipboard,
+  onOpenLoadDiagram,
+  onOpenChatDrawer,
+  onOpenAutoCorrect,
+  onOpenPinoutModal,
+  onClearCanvas,
+  onShowToast,
 }) => {
   const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // Clipboard and Right-Click Context Menu states
+  const [canvasClipboard, setCanvasClipboard] = useState<{
+    components: SchematicComponent[];
+    wires: Wire[];
+  } | null>(null);
+  const [contextMenuTarget, setContextMenuTarget] = useState<ContextMenuTarget | null>(null);
 
   // Click-to-Probe Active Target & Hover State
   const [activeProbe, setActiveProbe] = useState<ProbeTarget | null>(null);
@@ -214,7 +236,162 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
     onPanChange({ x: newPanX, y: newPanY });
   };
 
-  // Keyboard controls: Rotate, Delete, Escape
+  // Action Handlers: Delete, Copy, Cut, Duplicate, Paste, Flip
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedComponentIds.length === 0 && selectedWireIds.length === 0) return;
+    const newComps = components.filter((c) => !selectedComponentIds.includes(c.id));
+    const newWires = wires.filter((w) => {
+      if (selectedWireIds.includes(w.id)) return false;
+      if (w.startPin && selectedComponentIds.includes(w.startPin.componentId)) return false;
+      if (w.endPin && selectedComponentIds.includes(w.endPin.componentId)) return false;
+      return true;
+    });
+
+    if (onUpdateCircuit) {
+      onUpdateCircuit(newComps, newWires);
+    } else {
+      onUpdateComponents(newComps);
+      onUpdateWires(newWires);
+    }
+
+    const count = (components.length - newComps.length) + (wires.length - newWires.length);
+    onSelectComponents([]);
+    onSelectWires([]);
+    if (onShowToast) onShowToast(`Deleted ${count} item${count === 1 ? '' : 's'} from schematic`);
+  }, [components, wires, selectedComponentIds, selectedWireIds, onUpdateCircuit, onUpdateComponents, onUpdateWires, onSelectComponents, onSelectWires, onShowToast]);
+
+  const handleCopySelected = useCallback(() => {
+    if (selectedComponentIds.length === 0 && selectedWireIds.length === 0) return;
+    const copiedComps = components.filter((c) => selectedComponentIds.includes(c.id));
+    const copiedWires = wires.filter(
+      (w) =>
+        selectedWireIds.includes(w.id) ||
+        (w.startPin &&
+          w.endPin &&
+          selectedComponentIds.includes(w.startPin.componentId) &&
+          selectedComponentIds.includes(w.endPin.componentId))
+    );
+
+    const payload = { components: copiedComps, wires: copiedWires };
+    setCanvasClipboard(payload);
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(JSON.stringify({ circuitforge_circuit: true, ...payload }));
+      }
+    } catch {
+      // Ignore if clipboard access is blocked
+    }
+
+    if (onShowToast) {
+      onShowToast(`Copied ${copiedComps.length} component${copiedComps.length === 1 ? '' : 's'}${copiedWires.length > 0 ? ` and ${copiedWires.length} wires` : ''}`);
+    }
+  }, [components, wires, selectedComponentIds, selectedWireIds, onShowToast]);
+
+  const handleCutSelected = useCallback(() => {
+    handleCopySelected();
+    handleDeleteSelected();
+  }, [handleCopySelected, handleDeleteSelected]);
+
+  const handlePasteClipboard = useCallback((targetX?: number, targetY?: number) => {
+    if (!canvasClipboard || canvasClipboard.components.length === 0) {
+      if (onPasteFromClipboard) {
+        onPasteFromClipboard();
+      } else if (onShowToast) {
+        onShowToast('Clipboard is empty. Select components to copy (Ctrl+C)');
+      }
+      return;
+    }
+
+    const { components: clipComps, wires: clipWires } = canvasClipboard;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    clipComps.forEach((c) => {
+      if (c.x < minX) minX = c.x;
+      if (c.y < minY) minY = c.y;
+    });
+
+    const deltaX = targetX !== undefined ? snapToGrid(targetX - minX) : 40;
+    const deltaY = targetY !== undefined ? snapToGrid(targetY - minY) : 40;
+
+    const idMap: Record<string, string> = {};
+    const newComps: SchematicComponent[] = clipComps.map((c) => {
+      const newId = `comp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      idMap[c.id] = newId;
+      return {
+        ...c,
+        id: newId,
+        designator: `${c.designator}_copy`,
+        x: snapToGrid(c.x + deltaX),
+        y: snapToGrid(c.y + deltaY),
+      };
+    });
+
+    const newWires: Wire[] = clipWires.map((w) => {
+      const newId = `wire_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      return {
+        ...w,
+        id: newId,
+        points: w.points.map((p) => ({ x: snapToGrid(p.x + deltaX), y: snapToGrid(p.y + deltaY) })),
+        startPin: w.startPin
+          ? {
+              ...w.startPin,
+              componentId: idMap[w.startPin.componentId] || w.startPin.componentId,
+            }
+          : undefined,
+        endPin: w.endPin
+          ? {
+              ...w.endPin,
+              componentId: idMap[w.endPin.componentId] || w.endPin.componentId,
+            }
+          : undefined,
+      };
+    });
+
+    const combinedComps = [...components, ...newComps];
+    const combinedWires = [...wires, ...newWires];
+
+    if (onUpdateCircuit) {
+      onUpdateCircuit(combinedComps, combinedWires);
+    } else {
+      onUpdateComponents(combinedComps);
+      onUpdateWires(combinedWires);
+    }
+
+    onSelectComponents(newComps.map((c) => c.id));
+    onSelectWires(newWires.map((w) => w.id));
+
+    if (onShowToast) {
+      onShowToast(`Pasted ${newComps.length} component${newComps.length === 1 ? '' : 's'}`);
+    }
+  }, [canvasClipboard, components, wires, onUpdateCircuit, onUpdateComponents, onUpdateWires, onSelectComponents, onSelectWires, onPasteFromClipboard, onShowToast]);
+
+  const handleDuplicateSelected = useCallback(() => {
+    handleCopySelected();
+    setTimeout(() => {
+      handlePasteClipboard();
+    }, 20);
+  }, [handleCopySelected, handlePasteClipboard]);
+
+  const handleFlipSelected = useCallback(() => {
+    if (selectedComponentIds.length === 0) return;
+    const selComps = components.filter((c) => selectedComponentIds.includes(c.id));
+    const avgX = selComps.reduce((acc, c) => acc + c.x, 0) / selComps.length;
+    const updated = components.map((c) => {
+      if (!selectedComponentIds.includes(c.id)) return c;
+      const newRot = (c.rotation === 0 ? 180 : c.rotation === 180 ? 0 : c.rotation) as any;
+      return {
+        ...c,
+        x: snapToGrid(2 * avgX - c.x),
+        rotation: newRot,
+      };
+    });
+    onUpdateComponents(updated);
+    if (onShowToast) onShowToast('Flipped selected components horizontally');
+  }, [components, selectedComponentIds, onUpdateComponents, onShowToast]);
+
+  // Keyboard controls: Rotate, Delete, Copy, Cut, Paste, Duplicate, Select All, Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
@@ -224,30 +401,30 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
         return;
       }
 
-      if (e.key === 'r' || e.key === 'R') {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault();
+        handleCopySelected();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+        e.preventDefault();
+        handlePasteClipboard();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'x' || e.key === 'X')) {
+        e.preventDefault();
+        handleCutSelected();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault();
+        handleDuplicateSelected();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+        e.preventDefault();
+        onSelectComponents(components.map((c) => c.id));
+        onSelectWires(wires.map((w) => w.id));
+      } else if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
         const dir: CircuitRotationDirection = e.shiftKey ? 'ccw90' : 'cw90';
         handleRotateCircuit(dir);
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedComponentIds.length > 0 || selectedWireIds.length > 0) {
           e.preventDefault();
-          // Remove selected components
-          const newComps = components.filter((c) => !selectedComponentIds.includes(c.id));
-          // Remove wires connected to deleted components or explicitly selected wires
-          const newWires = wires.filter((w) => {
-            if (selectedWireIds.includes(w.id)) return false;
-            if (w.startPin && selectedComponentIds.includes(w.startPin.componentId)) return false;
-            if (w.endPin && selectedComponentIds.includes(w.endPin.componentId)) return false;
-            return true;
-          });
-          if (onUpdateCircuit) {
-            onUpdateCircuit(newComps, newWires);
-          } else {
-            onUpdateComponents(newComps);
-            onUpdateWires(newWires);
-          }
-          onSelectComponents([]);
-          onSelectWires([]);
+          handleDeleteSelected();
         }
       } else if (e.key === 'p' || e.key === 'P') {
         if (onToolChange) {
@@ -265,6 +442,9 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
         setIsDraggingComponents(false);
         setActiveGuides(null);
         setMagneticStatus(null);
+        if (contextMenuTarget) {
+          setContextMenuTarget(null);
+        }
         if (onFinishPlacingComponent) onFinishPlacingComponent();
       }
     };
@@ -279,9 +459,13 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
     selectedWireIds,
     components,
     wires,
-    onUpdateComponents,
-    onUpdateWires,
-    onUpdateCircuit,
+    contextMenuTarget,
+    handleRotateCircuit,
+    handleDeleteSelected,
+    handleCopySelected,
+    handleCutSelected,
+    handlePasteClipboard,
+    handleDuplicateSelected,
     onSelectComponents,
     onSelectWires,
     onFinishPlacingComponent,
@@ -522,44 +706,6 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
       onUpdateComponents(updated);
       onUpdateWires(updatedWires);
     }
-  };
-
-  // Duplicate selected components
-  const handleDuplicateSelected = () => {
-    if (selectedComponentIds.length === 0) return;
-    const selected = components.filter((c) => selectedComponentIds.includes(c.id));
-    const newComps: SchematicComponent[] = selected.map((c) => {
-      const newId = `comp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-      return {
-        ...c,
-        id: newId,
-        designator: `${c.designator}_copy`,
-        x: snapToGrid(c.x + 40),
-        y: snapToGrid(c.y + 40),
-      };
-    });
-    onUpdateComponents([...components, ...newComps]);
-    onSelectComponents(newComps.map((c) => c.id));
-  };
-
-  // Delete all selected components and wires
-  const handleDeleteSelected = () => {
-    if (selectedComponentIds.length === 0 && selectedWireIds.length === 0) return;
-    const remainingComponents = components.filter((c) => !selectedComponentIds.includes(c.id));
-    const remainingWires = wires.filter((w) => {
-      if (selectedWireIds.includes(w.id)) return false;
-      if (w.startPin && selectedComponentIds.includes(w.startPin.componentId)) return false;
-      if (w.endPin && selectedComponentIds.includes(w.endPin.componentId)) return false;
-      return true;
-    });
-    if (onUpdateCircuit) {
-      onUpdateCircuit(remainingComponents, remainingWires);
-    } else {
-      onUpdateComponents(remainingComponents);
-      onUpdateWires(remainingWires);
-    }
-    onSelectComponents([]);
-    onSelectWires([]);
   };
 
   // Handle click-to-probe for a component pin
@@ -941,6 +1087,30 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
       setIsDraggingComponents(false);
       setActiveGuides(null);
       setMagneticStatus(null);
+
+      // Auto-snap feature that aligns components to the nearest grid intersection when moving them
+      const movedIds = Array.from(dragInitialPositions.keys()) as string[];
+      if (movedIds.length > 0) {
+        const snappedComponents = components.map((c) => {
+          if (dragInitialPositions.has(c.id)) {
+            return {
+              ...c,
+              x: snapToGrid(c.x, GRID_SIZE),
+              y: snapToGrid(c.y, GRID_SIZE),
+            };
+          }
+          return c;
+        });
+
+        const updatedWires = updateWiresForMovedComponents(snappedComponents, movedIds);
+
+        if (onUpdateCircuit) {
+          onUpdateCircuit(snappedComponents, updatedWires);
+        } else {
+          onUpdateComponents(snappedComponents);
+          onUpdateWires(updatedWires);
+        }
+      }
     }
 
     // Drag-to-connect support:
@@ -1019,7 +1189,89 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
             setIsWiring(false);
             setWirePoints([]);
             setWireStartPin(null);
+            return;
           }
+
+          const worldPos = screenToWorld(e.clientX, e.clientY);
+
+          // 1. Check if right-clicked on a component
+          const clickedComp = components.find((c) => {
+            const def = getComponentDef(c.type);
+            const halfW = def.width / 2 + 10;
+            const halfH = def.height / 2 + 10;
+            return (
+              worldPos.x >= c.x - halfW &&
+              worldPos.x <= c.x + halfW &&
+              worldPos.y >= c.y - halfH &&
+              worldPos.y <= c.y + halfH
+            );
+          });
+
+          if (clickedComp) {
+            let nextSel = selectedComponentIds;
+            if (!selectedComponentIds.includes(clickedComp.id)) {
+              nextSel = [clickedComp.id];
+              onSelectComponents(nextSel);
+            }
+            setContextMenuTarget({
+              type: 'component',
+              component: clickedComp,
+              selectedComponentIds: nextSel,
+              selectedWireIds,
+              x: e.clientX,
+              y: e.clientY,
+              worldX: worldPos.x,
+              worldY: worldPos.y,
+            });
+            return;
+          }
+
+          // 2. Check if right-clicked on a wire
+          const clickedWire = wires.find((w) => {
+            for (let i = 0; i < w.points.length - 1; i++) {
+              const p1 = w.points[i];
+              const p2 = w.points[i + 1];
+              const minX = Math.min(p1.x, p2.x) - 10;
+              const maxX = Math.max(p1.x, p2.x) + 10;
+              const minY = Math.min(p1.y, p2.y) - 10;
+              const maxY = Math.max(p1.y, p2.y) + 10;
+              if (
+                worldPos.x >= minX &&
+                worldPos.x <= maxX &&
+                worldPos.y >= minY &&
+                worldPos.y <= maxY
+              ) {
+                return true;
+              }
+            }
+            return false;
+          });
+
+          if (clickedWire) {
+            onSelectWires([clickedWire.id]);
+            setContextMenuTarget({
+              type: 'wire',
+              wire: clickedWire,
+              selectedComponentIds,
+              selectedWireIds: [clickedWire.id],
+              x: e.clientX,
+              y: e.clientY,
+              worldX: worldPos.x,
+              worldY: worldPos.y,
+            });
+            return;
+          }
+
+          // 3. Right-clicked on empty canvas
+          setContextMenuTarget({
+            type: 'canvas',
+            selectedComponentIds,
+            selectedWireIds,
+            x: e.clientX,
+            y: e.clientY,
+            worldX: worldPos.x,
+            worldY: worldPos.y,
+          });
         }}
       >
         <defs>
@@ -2645,6 +2897,33 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
           Click pin to connect • Click canvas for orthogonal bend • Esc to cancel
         </div>
       )}
+
+      {/* Right-Click Context Menu (Components, Wires, or Canvas) */}
+      <SchematicContextMenu
+        target={contextMenuTarget}
+        onClose={() => setContextMenuTarget(null)}
+        onDeleteSelected={handleDeleteSelected}
+        onCopySelected={handleCopySelected}
+        onCutSelected={handleCutSelected}
+        onPasteAtPos={(x, y) => handlePasteClipboard(x, y)}
+        onDuplicateSelected={handleDuplicateSelected}
+        onRotateSelected={(dir) => handleRotateCircuit(dir)}
+        onFlipSelected={handleFlipSelected}
+        onEditComponentValue={(comp) => {
+          setEditingValueCompId(comp.id);
+          setEditingValueText(comp.value);
+        }}
+        onOpenPinoutMap={onOpenPinoutModal}
+        onProbeTarget={(net) => {
+          if (onToggleProbeNet) onToggleProbeNet(net);
+        }}
+        onOpenLoadDiagram={onOpenLoadDiagram}
+        onOpenChatDrawer={onOpenChatDrawer}
+        onOpenAutoCorrect={onOpenAutoCorrect}
+        onFitView={onZoomFit}
+        onClearAll={onClearCanvas}
+        canPaste={Boolean(canvasClipboard && canvasClipboard.components.length > 0)}
+      />
     </div>
   );
 };

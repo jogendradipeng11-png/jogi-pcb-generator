@@ -18,6 +18,7 @@ import {
   Sliders,
   Maximize2,
   FileText,
+  Globe,
 } from 'lucide-react';
 
 interface ComponentLibraryPanelProps {
@@ -25,6 +26,8 @@ interface ComponentLibraryPanelProps {
   selectedDef: ComponentDefinition | null;
   onOpenGoogleRefModal?: () => void;
   onOpenAllDataSheetModal?: () => void;
+  onOpenCircuitsDiyModal?: () => void;
+  onOpenPinoutModal?: () => void;
 }
 
 const CATEGORIES: { id: ComponentCategory | 'all'; label: string; icon: any }[] = [
@@ -45,6 +48,8 @@ export const ComponentLibraryPanel: React.FC<ComponentLibraryPanelProps> = ({
   selectedDef,
   onOpenGoogleRefModal,
   onOpenAllDataSheetModal,
+  onOpenCircuitsDiyModal,
+  onOpenPinoutModal,
 }) => {
   const [activeCategory, setActiveCategory] = useState<ComponentCategory | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -73,8 +78,30 @@ export const ComponentLibraryPanel: React.FC<ComponentLibraryPanelProps> = ({
           </span>
         </div>
 
-        {/* Quick Access to AllDataSheet and Google Reference */}
+        {/* Quick Access to Circuits-DIY, Pinouts, AllDataSheet and Web Reference */}
         <div className="grid grid-cols-1 gap-1.5">
+          {onOpenCircuitsDiyModal && (
+            <button
+              onClick={onOpenCircuitsDiyModal}
+              className="w-full py-1.5 px-2 bg-gradient-to-r from-emerald-800 via-teal-700 to-emerald-700 hover:from-emerald-700 hover:to-teal-600 text-white rounded-md text-[11px] font-semibold flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer border border-emerald-500/50"
+              title="Browse and import circuits directly from https://www.circuits-diy.com/"
+            >
+              <Globe className="w-3.5 h-3.5 text-emerald-300" />
+              <span>Circuits-DIY Schematics</span>
+            </button>
+          )}
+
+          {onOpenPinoutModal && (
+            <button
+              onClick={onOpenPinoutModal}
+              className="w-full py-1 px-2 bg-slate-800 hover:bg-slate-750 text-sky-300 rounded-md text-[11px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-sky-600/40 hover:border-sky-500"
+              title="View pinout diagrams, roles, uses, or register missing components"
+            >
+              <Cpu className="w-3.5 h-3.5 text-sky-400" />
+              <span>Pinout Maps &amp; Add Part</span>
+            </button>
+          )}
+
           {onOpenAllDataSheetModal && (
             <button
               onClick={onOpenAllDataSheetModal}

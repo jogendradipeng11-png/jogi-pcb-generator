@@ -38,6 +38,11 @@ import { AuthModal } from './components/auth/AuthModal';
 import { KeyboardShortcutsModal } from './components/help/KeyboardShortcutsModal';
 import { KeyboardShortcutsOverlay } from './components/help/KeyboardShortcutsOverlay';
 import { GitHubDeployModal } from './components/modals/GitHubDeployModal';
+import { AutoCorrectModal } from './components/modals/AutoCorrectModal';
+import { CircuitsDiyExplorerModal } from './components/modals/CircuitsDiyExplorerModal';
+import { ComponentPinoutModal } from './components/modals/ComponentPinoutModal';
+import { LoadDiagramSketchModal } from './components/modals/LoadDiagramSketchModal';
+import { AiCircuitChatDrawer } from './components/chat/AiCircuitChatDrawer';
 import { getCurrentUser, setCurrentUser, subscribeToAuthChanges } from './utils/authService';
 import { loadUserSavedComponents } from './utils/userComponents';
 import { stepCircuitSimulation } from './utils/simulation';
@@ -159,7 +164,16 @@ export default function App() {
   const [allDataSheetSearchQuery, setAllDataSheetSearchQuery] = useState('');
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
   const [isGitHubModalOpen, setIsGitHubModalOpen] = useState(false);
+  const [isCircuitsDiyOpen, setIsCircuitsDiyOpen] = useState(false);
+  const [isAutoCorrectOpen, setIsAutoCorrectOpen] = useState(false);
+  const [isPinoutModalOpen, setIsPinoutModalOpen] = useState(false);
+  const [isLoadDiagramModalOpen, setIsLoadDiagramModalOpen] = useState(false);
+  const [isChatDrawerOpen, setIsChatDrawerOpen] = useState(false);
   const [productSelectorComp, setProductSelectorComp] = useState<SchematicComponent | null>(null);
+  const [internalClipboard, setInternalClipboard] = useState<{
+    components: SchematicComponent[];
+    wires: Wire[];
+  } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showInfoBanner, setShowInfoBanner] = useState(true);
 
@@ -1042,6 +1056,14 @@ export default function App() {
     handleUpdateComponents(updated);
   };
 
+  // Toast helper
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((curr) => (curr === msg ? null : curr));
+    }, 4000);
+  }, []);
+
   // Delete selected components / wires
   const handleDeleteSelected = () => {
     if (selectedCompIds.length === 0 && selectedWireIds.length === 0) return;
@@ -1060,9 +1082,84 @@ export default function App() {
       wires: newWires,
       updatedAt: new Date().toISOString(),
     });
+    const removedCount = (currentComps.length - newComps.length) + (currentWires.length - newWires.length);
     setSelectedCompIds([]);
     setSelectedWireIds([]);
+    showToast(`Deleted ${removedCount} item${removedCount === 1 ? '' : 's'}`);
   };
+
+  // Copy selected components and wires
+  const handleCopySelected = useCallback(() => {
+    if (selectedCompIds.length === 0 && selectedWireIds.length === 0) {
+      showToast('Select components or wires first to copy');
+      return;
+    }
+    const currentComps = safeDoc.components || [];
+    const currentWires = safeDoc.wires || [];
+    const copiedComps = currentComps.filter((c) => selectedCompIds.includes(c.id));
+    const copiedWires = currentWires.filter(
+      (w) =>
+        selectedWireIds.includes(w.id) ||
+        (w.startPin &&
+          w.endPin &&
+          selectedCompIds.includes(w.startPin.componentId) &&
+          selectedCompIds.includes(w.endPin.componentId))
+    );
+
+    const payload = { components: copiedComps, wires: copiedWires };
+    setInternalClipboard(payload);
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(JSON.stringify({ circuitforge_circuit: true, ...payload }));
+      }
+    } catch {
+      // ignore
+    }
+    showToast(`Copied ${copiedComps.length} component${copiedComps.length === 1 ? '' : 's'} (Ctrl+C)`);
+  }, [selectedCompIds, selectedWireIds, safeDoc, showToast]);
+
+  // Paste components from clipboard
+  const handlePasteSelected = useCallback(() => {
+    if (!internalClipboard || internalClipboard.components.length === 0) {
+      handlePasteFromClipboard();
+      return;
+    }
+    const deltaX = 40;
+    const deltaY = 40;
+    const idMap: Record<string, string> = {};
+    const newComps: SchematicComponent[] = internalClipboard.components.map((c) => {
+      const newId = `comp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      idMap[c.id] = newId;
+      return {
+        ...c,
+        id: newId,
+        designator: `${c.designator}_copy`,
+        x: Math.round((c.x + deltaX) / 10) * 10,
+        y: Math.round((c.y + deltaY) / 10) * 10,
+      };
+    });
+    const newWires: Wire[] = internalClipboard.wires.map((w) => ({
+      ...w,
+      id: `wire_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      points: w.points.map((p) => ({ x: p.x + deltaX, y: p.y + deltaY })),
+      startPin: w.startPin
+        ? { ...w.startPin, componentId: idMap[w.startPin.componentId] || w.startPin.componentId }
+        : undefined,
+      endPin: w.endPin
+        ? { ...w.endPin, componentId: idMap[w.endPin.componentId] || w.endPin.componentId }
+        : undefined,
+    }));
+    commitDocumentChange({
+      ...safeDoc,
+      components: [...(safeDoc.components || []), ...newComps],
+      wires: [...(safeDoc.wires || []), ...newWires],
+      updatedAt: new Date().toISOString(),
+    });
+    setSelectedCompIds(newComps.map((c) => c.id));
+    setSelectedWireIds(newWires.map((w) => w.id));
+    showToast(`Pasted ${newComps.length} components and ${newWires.length} wires`);
+  }, [internalClipboard, safeDoc, commitDocumentChange, handlePasteFromClipboard, showToast]);
 
   // Apply AI Generated Circuit
   const handleApplyAiCircuit = (
@@ -1106,14 +1203,6 @@ export default function App() {
     setZoom(1.0);
     setPan({ x: 80, y: 40 });
   };
-
-  // Toast helper
-  const showToast = useCallback((msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage((curr) => (curr === msg ? null : curr));
-    }, 4000);
-  }, []);
 
   // Export Gerber & Excellon Drill files in a ZIP archive
   const handleExportGerber = useCallback(async () => {
@@ -1167,19 +1256,77 @@ export default function App() {
     );
   }, [safeDoc, commitDocumentChange, showToast]);
 
-  // Export JSON file
-  const handleExportJson = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(safeDoc, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute(
-      'download',
-      `${(safeDoc.title || 'circuit').toLowerCase().replace(/\s+/g, '_')}_schematic.json`
-    );
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
+  // Save circuit to browser localStorage & persistent state
+  const handleSaveCircuit = useCallback(() => {
+    try {
+      localStorage.setItem('circuiteda_saved_circuit', JSON.stringify(safeDoc));
+      const existingListStr = localStorage.getItem('circuiteda_saved_projects_list') || '[]';
+      let existingList: any[] = [];
+      try {
+        existingList = JSON.parse(existingListStr);
+      } catch (e) {
+        existingList = [];
+      }
+      const updatedList = [
+        {
+          id: safeDoc.id,
+          title: safeDoc.title || 'Untitled Circuit',
+          savedAt: new Date().toISOString(),
+          componentsCount: (safeDoc.components || []).length,
+          wiresCount: (safeDoc.wires || []).length,
+        },
+        ...existingList.filter((item: any) => item.id !== safeDoc.id),
+      ].slice(0, 30);
+      localStorage.setItem('circuiteda_saved_projects_list', JSON.stringify(updatedList));
+
+      showToast(`💾 Saved circuit "${safeDoc.title || 'Untitled'}" (${(safeDoc.components || []).length} parts, ${(safeDoc.wires || []).length} wires)!`);
+    } catch (e) {
+      console.error('Error saving circuit:', e);
+      showToast('Circuit state saved in memory.');
+    }
+  }, [safeDoc, showToast]);
+
+  // Export and Download JSON file
+  const handleExportJson = useCallback(() => {
+    try {
+      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(safeDoc, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute('href', dataStr);
+      downloadAnchor.setAttribute(
+        'download',
+        `${(safeDoc.title || 'circuit').toLowerCase().replace(/[^a-z0-9]/g, '_')}_schematic.json`
+      );
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      showToast(`📥 Downloaded "${safeDoc.title || 'circuit'}" schematic JSON file!`);
+    } catch (err) {
+      console.error('Download error:', err);
+      showToast('Failed to download schematic file.');
+    }
+  }, [safeDoc, showToast]);
+
+  // Circuits-DIY Project Ingestion
+  const handleLoadCircuitsDiy = useCallback((circuit: SchematicDocument) => {
+    commitDocumentChange(sanitizeDocument(circuit));
+    setSelectedCompIds([]);
+    setSelectedWireIds([]);
+    setIsCircuitsDiyOpen(false);
+    showToast(`⚡ Loaded "${circuit.title}" from Circuits-DIY into editor!`);
+  }, [commitDocumentChange, showToast]);
+
+  const handleAppendCircuitsDiy = useCallback((circuit: SchematicDocument) => {
+    handleAddCircuitFromGoogle(circuit.components || [], circuit.wires || []);
+    setIsCircuitsDiyOpen(false);
+    showToast(`⚡ Appended "${circuit.title}" from Circuits-DIY to schematic!`);
+  }, [handleAddCircuitFromGoogle, showToast]);
+
+  // Circuit Auto-Correction Engine Apply
+  const handleApplyAutoCorrection = useCallback((correctedDoc: SchematicDocument, summaryMsg: string) => {
+    commitDocumentChange(sanitizeDocument(correctedDoc));
+    setIsAutoCorrectOpen(false);
+    showToast(summaryMsg);
+  }, [commitDocumentChange, showToast]);
 
   // Selected component objects
   const selectedComponents = (safeDoc.components || []).filter((c) =>
@@ -1196,6 +1343,8 @@ export default function App() {
         activeTool={activeTool}
         onToolChange={setActiveTool}
         onOpenAiModal={() => setIsAiModalOpen(true)}
+        onOpenLoadDiagram={() => setIsLoadDiagramModalOpen(true)}
+        onOpenChatDrawer={() => setIsChatDrawerOpen(true)}
         onOpenBom={() => setIsBomOpen(true)}
         onOpenErc={() => setIsErcOpen(true)}
         onOpenNetlist={() => setIsNetlistOpen(true)}
@@ -1207,6 +1356,8 @@ export default function App() {
         onAnnotate={handleAnnotate}
         onRotateSelected={handleRotateSelected}
         onDeleteSelected={handleDeleteSelected}
+        onCopySelected={handleCopySelected}
+        onPasteSelected={handlePasteSelected}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
         onZoomFit={handleZoomFit}
@@ -1257,6 +1408,10 @@ export default function App() {
         onOpenAuthModal={handleOpenAuth}
         onLogout={handleLogout}
         onSearchGoogle={handleSearchGoogle}
+        onOpenCircuitsDiy={() => setIsCircuitsDiyOpen(true)}
+        onOpenPinoutModal={() => setIsPinoutModalOpen(true)}
+        onOpenAutoCorrectModal={() => setIsAutoCorrectOpen(true)}
+        onSaveCircuit={handleSaveCircuit}
         onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
         onOpenAllDataSheetModal={() => handleOpenAllDataSheetModal()}
         onInsertPowerReferences={handleInsertPowerReferences}
@@ -1276,6 +1431,8 @@ export default function App() {
             selectedDef={placingDef}
             onOpenGoogleRefModal={() => setIsGoogleModalOpen(true)}
             onOpenAllDataSheetModal={() => handleOpenAllDataSheetModal()}
+            onOpenCircuitsDiyModal={() => setIsCircuitsDiyOpen(true)}
+            onOpenPinoutModal={() => setIsPinoutModalOpen(true)}
           />
         )}
 
@@ -1307,6 +1464,26 @@ export default function App() {
               onOpenFullScope={() => setIsScopeOpen(true)}
               onUpdateComponentSettings={handleUpdateComponentSettings}
               onPasteFromClipboard={handlePasteFromClipboard}
+              onOpenLoadDiagram={() => setIsLoadDiagramModalOpen(true)}
+              onOpenChatDrawer={() => setIsChatDrawerOpen(true)}
+              onOpenAutoCorrect={() => setIsAutoCorrectOpen(true)}
+              onOpenPinoutModal={(comp) => {
+                setProductSelectorComp(comp);
+                setIsPinoutModalOpen(true);
+              }}
+              onClearCanvas={() => {
+                commitDocumentChange({
+                  ...safeDoc,
+                  components: [],
+                  wires: [],
+                  updatedAt: new Date().toISOString(),
+                });
+                setSelectedCompIds([]);
+                setSelectedWireIds([]);
+                showToast('Cleared schematic canvas');
+              }}
+              onShowToast={showToast}
+              onZoomFit={handleZoomFit}
             />
           ) : viewMode === 'pcb' ? (
             <PcbCanvas
@@ -1644,6 +1821,131 @@ export default function App() {
           setIsGitHubModalOpen(false);
           handleOpenAuth(mode);
         }}
+      />
+
+      {/* Circuits-DIY.com Project Schematics & Search Modal */}
+      <CircuitsDiyExplorerModal
+        isOpen={isCircuitsDiyOpen}
+        onClose={() => setIsCircuitsDiyOpen(false)}
+        onLoadCircuit={handleLoadCircuitsDiy}
+        onAppendCircuit={handleAppendCircuitsDiy}
+        onShowToast={showToast}
+      />
+
+      {/* Component Pinout Maps, Uses & Missing Component Creator */}
+      <ComponentPinoutModal
+        isOpen={isPinoutModalOpen}
+        onClose={() => setIsPinoutModalOpen(false)}
+        onSelectComponentToPlace={(def) => {
+          registerCustomComponentDef(def);
+          setPlacingDef(def);
+          setActiveTool('select');
+          setIsPinoutModalOpen(false);
+          showToast(`Click anywhere on canvas to place ${def.name}`);
+        }}
+        onAddComponentDirectlyToCanvas={(def) => {
+          registerCustomComponentDef(def);
+          const currentComps = safeDoc.components || [];
+          const maxX = currentComps.length > 0 ? Math.max(...currentComps.map((c) => c.x)) + 140 : 200;
+          const prefix = def.prefix || 'U';
+          const existingWithPrefix = currentComps.filter((c) => c.designator?.startsWith(prefix)).length;
+          const newComp: SchematicComponent = {
+            id: `comp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            type: def.type,
+            designator: `${prefix}${existingWithPrefix + 1}`,
+            value: def.defaultVal || def.name,
+            footprint: def.defaultFootprint || 'MODULE_STANDARD',
+            x: Math.round(maxX / 10) * 10,
+            y: 220,
+            rotation: 0,
+            pins: def.pins.map((p) => ({ id: p.id, name: p.name })),
+          };
+          const updated = sanitizeDocument({
+            ...safeDoc,
+            components: [...currentComps, newComp],
+            updatedAt: new Date().toISOString(),
+          });
+          commitDocumentChange(updated);
+          setSelectedCompIds([newComp.id]);
+          setSelectedWireIds([]);
+          setIsPinoutModalOpen(false);
+          showToast(`Placed "${def.name}" (${newComp.designator}) directly onto schematic!`);
+        }}
+        onShowToast={showToast}
+      />
+
+      {/* Circuit Auto-Corrector & Electrical Rule Engine Modal */}
+      <AutoCorrectModal
+        isOpen={isAutoCorrectOpen}
+        onClose={() => setIsAutoCorrectOpen(false)}
+        document={safeDoc}
+        onApplyCorrection={handleApplyAutoCorrection}
+      />
+
+      {/* Load Diagram, Document, or Rough Sketch Modal (AI Vision + Whiteboard + Zero 404/405 Global Importer) */}
+      <LoadDiagramSketchModal
+        isOpen={isLoadDiagramModalOpen}
+        onClose={() => setIsLoadDiagramModalOpen(false)}
+        onApplyCircuit={(circuit, mode) => {
+          if (mode === 'replace') {
+            const newDoc: SchematicDocument = {
+              id: `sketch_${Date.now()}`,
+              title: circuit.title || 'Imported Diagram / Sketch',
+              category: 'Loaded',
+              summary: circuit.description || 'Imported diagram transformed into verified schematic.',
+              components: circuit.components || [],
+              wires: circuit.wires || [],
+              version: 1,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            commitDocumentChange(sanitizeDocument(newDoc));
+          } else {
+            const currentComps = safeDoc.components || [];
+            const maxX = currentComps.length > 0
+              ? Math.max(...currentComps.map((c) => c.x)) + 250
+              : 150;
+            const minImportX = (circuit.components || []).length > 0
+              ? Math.min(...(circuit.components || []).map((c) => c.x))
+              : 0;
+            const deltaX = maxX - minImportX;
+            const offsetComps = (circuit.components || []).map((c) => ({
+              ...c,
+              id: `imp_${c.id}_${Date.now()}`,
+              x: c.x + deltaX,
+            }));
+            const offsetWires = (circuit.wires || []).map((w) => ({
+              ...w,
+              id: `imp_${w.id}_${Date.now()}`,
+              points: (w.points || []).map((p) => ({ x: p.x + deltaX, y: p.y })),
+            }));
+            commitDocumentChange({
+              ...safeDoc,
+              components: [...currentComps, ...offsetComps],
+              wires: [...(safeDoc.wires || []), ...offsetWires],
+              updatedAt: new Date().toISOString(),
+            });
+          }
+          setViewMode('schematic');
+          showToast(`Successfully synthesized "${circuit.title}" with all components & wires!`);
+        }}
+        onShowToast={showToast}
+      />
+
+      {/* AI Circuit Engineering Chat & Suggestions Drawer */}
+      <AiCircuitChatDrawer
+        isOpen={isChatDrawerOpen}
+        onClose={() => setIsChatDrawerOpen(false)}
+        document={safeDoc}
+        onApplyModification={(updatedDoc, note) => {
+          commitDocumentChange(sanitizeDocument(updatedDoc));
+          showToast(note || 'Applied AI circuit modification to schematic!');
+        }}
+        onSelectComponents={(ids) => {
+          setSelectedCompIds(ids);
+          setSelectedWireIds([]);
+        }}
+        onShowToast={showToast}
       />
 
       {/* Floating Status Toast Notification */}

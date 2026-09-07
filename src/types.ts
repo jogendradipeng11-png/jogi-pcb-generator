@@ -34,6 +34,15 @@ export interface ComponentDefinition {
   description: string;
   symbol: string; // SVG path or shape identifier
   imageUrl?: string;
+  uses?: string;
+  pinoutDetails?: Array<{
+    pin: string | number;
+    name: string;
+    description: string;
+    type?: string;
+  }>;
+  ratings?: Record<string, string>;
+  applicationNotes?: string;
 }
 
 export interface ComponentPinState {

@@ -793,6 +793,174 @@ export const ComponentGlyph: React.FC<ComponentGlyphProps> = ({
           </g>
         );
 
+      case 'optocoupler':
+      case 'pc817':
+        return (
+          <g>
+            <rect
+              x="-38"
+              y="-30"
+              width="76"
+              height="60"
+              rx="4"
+              fill="#0f172a"
+              stroke="#38bdf8"
+              strokeWidth="1.8"
+            />
+            {/* Center optical isolation barrier */}
+            <line x1="0" y1="-28" x2="0" y2="28" stroke="#0284c7" strokeWidth="1" strokeDasharray="2 2" />
+            {/* Left side: LED */}
+            <g stroke="#f59e0b" strokeWidth="1.5" fill="none">
+              <line x1="-38" y1="-18" x2="-20" y2="-18" />
+              <line x1="-20" y1="-18" x2="-20" y2="-8" />
+              <polygon points="-26,-8 -14,-8 -20,6" fill="#f59e0b" />
+              <line x1="-26" y1="6" x2="-14" y2="6" />
+              <line x1="-20" y1="6" x2="-20" y2="18" />
+              <line x1="-20" y1="18" x2="-38" y2="18" />
+              {/* Emitted light arrows */}
+              <line x1="-12" y1="-4" x2="-4" y2="-9" stroke="#fbbf24" strokeWidth="1.2" />
+              <line x1="-10" y1="4" x2="-2" y2="-1" stroke="#fbbf24" strokeWidth="1.2" />
+            </g>
+            {/* Right side: Output Detector (Phototriac or phototransistor) */}
+            <g stroke="#38bdf8" strokeWidth="1.5" fill="none">
+              <line x1="38" y1="-18" x2="18" y2="-18" />
+              <line x1="18" y1="-18" x2="18" y2="-6" />
+              {/* Output thyristor/transistor symbol */}
+              <polygon points="12,-6 24,-6 18,6" fill="#38bdf8" opacity="0.8" />
+              <line x1="18" y1="6" x2="18" y2="18" />
+              <line x1="18" y1="18" x2="38" y2="18" />
+            </g>
+            <text x="0" y="-21" textAnchor="middle" fill="#7dd3fc" fontSize="6.5" fontWeight="bold" fontFamily="monospace">
+              ISO 7.5kV
+            </text>
+          </g>
+        );
+
+      case 'triac':
+        return (
+          <g stroke="#f59e0b" strokeWidth="1.8" fill="none">
+            {/* Main Terminals Leads */}
+            <line x1="-28" y1="20" x2="-10" y2="20" />
+            <line x1="-10" y1="20" x2="-10" y2="10" />
+            <line x1="10" y1="0" x2="28" y2="0" />
+            {/* Antiparallel Thyristor Triangles */}
+            <polygon points="-10,12 8,-2 -10,-16" fill="#f59e0b" fillOpacity="0.3" />
+            <polygon points="6,16 -12,2 6,-12" fill="#f59e0b" fillOpacity="0.3" />
+            {/* Anode/Cathode bars */}
+            <line x1="-10" y1="-18" x2="-10" y2="16" />
+            <line x1="8" y1="-14" x2="8" y2="18" />
+            {/* Gate lead */}
+            <path d="M -28,-15 L -6,-15 L -2,-4" stroke="#f59e0b" strokeWidth="1.5" />
+            <circle cx="-2" cy="-4" r="2" fill="#f59e0b" />
+            <text x="-16" y="-19" fill="#fbbf24" fontSize="7" fontWeight="bold" fontFamily="monospace" stroke="none">
+              G
+            </text>
+          </g>
+        );
+
+      case 'bridge_rectifier':
+        return (
+          <g>
+            {/* Diamond container */}
+            <polygon
+              points="0,-26 28,0 0,26 -28,0"
+              fill="#0f172a"
+              stroke="#38bdf8"
+              strokeWidth="1.8"
+            />
+            {/* Diode bridge internal graphics */}
+            <text x="-18" y="-4" fill="#94a3b8" fontSize="9" fontWeight="bold" fontFamily="monospace">~</text>
+            <text x="-18" y="14" fill="#94a3b8" fontSize="9" fontWeight="bold" fontFamily="monospace">~</text>
+            <text x="10" y="-4" fill="#ef4444" fontSize="8" fontWeight="bold" fontFamily="monospace">+</text>
+            <text x="10" y="14" fill="#0284c7" fontSize="8" fontWeight="bold" fontFamily="monospace">-</text>
+            <text x="0" y="3" textAnchor="middle" fill="#38bdf8" fontSize="7" fontWeight="bold" fontFamily="monospace">
+              AC/DC
+            </text>
+          </g>
+        );
+
+      case 'relay_spdt':
+        return (
+          <g>
+            <rect
+              x="-38"
+              y="-28"
+              width="76"
+              height="56"
+              rx="4"
+              fill="#0f172a"
+              stroke="#10b981"
+              strokeWidth="1.8"
+            />
+            {/* Coil Section on left */}
+            <g stroke="#38bdf8" strokeWidth="1.4" fill="none">
+              <line x1="-38" y1="-20" x2="-22" y2="-20" />
+              <rect x="-22" y="-12" width="12" height="24" rx="2" stroke="#38bdf8" fill="#1e293b" />
+              <line x1="-22" y1="-12" x2="-10" y2="12" stroke="#38bdf8" />
+              <line x1="-38" y1="20" x2="-22" y2="20" />
+            </g>
+            {/* Mechanical Link dashed */}
+            <line x1="-10" y1="0" x2="6" y2="0" stroke="#94a3b8" strokeWidth="1" strokeDasharray="2 2" />
+            {/* Switch Contacts on right */}
+            <g stroke="#10b981" strokeWidth="1.6" fill="none">
+              <line x1="38" y1="0" x2="16" y2="0" />
+              {/* Contact blade pivoting at (16, 0) pointing to NO (22, -18) */}
+              <line x1="16" y1="0" x2="26" y2="-12" />
+              <circle cx="28" cy="-18" r="2" fill="#10b981" />
+              <circle cx="28" cy="18" r="2" fill="#10b981" />
+              <line x1="28" y1="-18" x2="38" y2="-18" />
+              <line x1="28" y1="18" x2="38" y2="18" />
+            </g>
+            <text x="22" y="-20" fill="#cbd5e1" fontSize="6" fontFamily="monospace">NO</text>
+            <text x="22" y="24" fill="#cbd5e1" fontSize="6" fontFamily="monospace">NC</text>
+            <text x="22" y="4" fill="#cbd5e1" fontSize="6" fontFamily="monospace">COM</text>
+          </g>
+        );
+
+      case 'transformer':
+        return (
+          <g stroke="#f59e0b" strokeWidth="1.8" fill="none">
+            {/* Primary Inductor Coils */}
+            <line x1="-38" y1="-20" x2="-16" y2="-20" />
+            <path d="M -16,-20 A 7,7 0 0,1 -16,-6 A 7,7 0 0,1 -16,8 A 7,7 0 0,1 -16,20" />
+            <line x1="-16" y1="20" x2="-38" y2="20" />
+            {/* Core Plates in middle */}
+            <line x1="-2" y1="-22" x2="-2" y2="22" stroke="#94a3b8" strokeWidth="1.5" />
+            <line x1="2" y1="-22" x2="2" y2="22" stroke="#94a3b8" strokeWidth="1.5" />
+            {/* Secondary Inductor Coils */}
+            <line x1="38" y1="-20" x2="16" y2="-20" />
+            <path d="M 16,-20 A 7,7 0 0,0 16,-6 A 7,7 0 0,0 16,8 A 7,7 0 0,0 16,20" />
+            <line x1="16" y1="20" x2="38" y2="20" />
+          </g>
+        );
+
+      case 'lamp':
+        return (
+          <g>
+            {/* Leads */}
+            <line x1="-25" y1="0" x2="-14" y2="0" stroke="#f59e0b" strokeWidth="2" />
+            <line x1="14" y1="0" x2="25" y2="0" stroke="#f59e0b" strokeWidth="2" />
+            {/* Circle */}
+            <circle cx="0" cy="0" r="14" fill="#1e293b" stroke="#f59e0b" strokeWidth="2" />
+            {/* Filament X */}
+            <line x1="-9" y1="-9" x2="9" y2="9" stroke="#fbbf24" strokeWidth="2" />
+            <line x1="-9" y1="9" x2="9" y2="-9" stroke="#fbbf24" strokeWidth="2" />
+          </g>
+        );
+
+      case 'fuse':
+        return (
+          <g stroke="#f59e0b" strokeWidth="1.8" fill="none">
+            {/* Leads */}
+            <line x1="-25" y1="0" x2="-16" y2="0" />
+            <line x1="16" y1="0" x2="25" y2="0" />
+            {/* Fuse Cartridge */}
+            <rect x="-16" y="-8" width="32" height="16" rx="2" fill="#0f172a" stroke="#f59e0b" />
+            {/* Conductor through center */}
+            <line x1="-16" y1="0" x2="16" y2="0" stroke="#fbbf24" strokeWidth="1.2" />
+          </g>
+        );
+
       default:
         // Generic rectangular IC
         return (

@@ -43,6 +43,9 @@ import {
   Github,
   ClipboardPaste,
   Triangle,
+  Save,
+  Copy,
+  Upload,
 } from 'lucide-react';
 import { EditorTool, CanvasViewMode, SchematicDocument, UserProfile, SimulationState, SchematicComponent, Wire, SimulationScenario, OperatingConditions } from '../../types';
 import { STARTER_CIRCUITS } from '../../data/examples';
@@ -54,13 +57,21 @@ interface HeaderProps {
   activeTool: EditorTool;
   onToolChange: (tool: EditorTool) => void;
   onOpenAiModal: () => void;
+  onOpenLoadDiagram?: () => void;
+  onOpenChatDrawer?: () => void;
   onOpenBom: () => void;
   onOpenErc: () => void;
   onOpenNetlist: () => void;
   onOpenPrintPdf?: () => void;
   onOpenUniversalModal?: () => void;
   onOpenGoogleModal?: () => void;
+  onOpenCircuitsDiy?: () => void;
+  onOpenPinoutModal?: () => void;
+  onOpenAutoCorrectModal?: () => void;
+  onSaveCircuit?: () => void;
   onPasteFromClipboard?: () => void;
+  onCopySelected?: () => void;
+  onPasteSelected?: () => void;
   onExportGerber?: () => void;
   onAutoRoute?: () => void;
   onAnnotate?: () => void;
@@ -104,13 +115,21 @@ export const Header: React.FC<HeaderProps> = ({
   activeTool,
   onToolChange,
   onOpenAiModal,
+  onOpenLoadDiagram,
+  onOpenChatDrawer,
   onOpenBom,
   onOpenErc,
   onOpenNetlist,
   onOpenPrintPdf,
   onOpenUniversalModal,
   onOpenGoogleModal,
+  onOpenCircuitsDiy,
+  onOpenPinoutModal,
+  onOpenAutoCorrectModal,
+  onSaveCircuit,
   onPasteFromClipboard,
+  onCopySelected,
+  onPasteSelected,
   onOpenAllDataSheetModal,
   onInsertPowerReferences,
   onExportGerber,
@@ -322,10 +341,70 @@ export const Header: React.FC<HeaderProps> = ({
             className="px-3.5 py-1.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-sky-950 flex items-center gap-1.5 transition-all cursor-pointer"
           >
             <Sparkles className="w-4 h-4 text-amber-300" />
-            <span>AI Schematic Prompt &amp; Image</span>
+            <span>AI Schematic</span>
           </button>
 
+          {/* Load Diagram, Document, or Rough Sketch (Upload, Draw, or Paste Link) */}
+          {onOpenLoadDiagram && (
+            <button
+              onClick={onOpenLoadDiagram}
+              className="px-3 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-700 hover:from-violet-500 hover:to-indigo-600 text-white rounded-lg text-xs font-semibold shadow-md flex items-center gap-1.5 transition-all cursor-pointer border border-violet-400/40"
+              title="Load Diagram, Document, or Rough Sketch (Upload image, draw rough whiteboard sketch, or paste URL with zero 404s)"
+            >
+              <Upload className="w-3.5 h-3.5 text-amber-300" />
+              <span>Load Diagram / Rough Sketch</span>
+            </button>
+          )}
+
+          {/* Suggestions & Interactive Circuit Chat */}
+          {onOpenChatDrawer && (
+            <button
+              onClick={onOpenChatDrawer}
+              className="px-2.5 py-1.5 bg-slate-850 hover:bg-slate-800 text-amber-300 rounded-lg text-xs font-medium border border-amber-500/40 hover:border-amber-400 flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="AI Suggestions & Interactive Circuit Engineering Chat (troubleshoot, suggest changes, modify components)"
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
+              <span>Suggestions &amp; Chat</span>
+            </button>
+          )}
+
           <div className="h-5 w-px bg-slate-800" />
+
+          {/* Circuits-DIY Online Circuits & Projects Explorer */}
+          {onOpenCircuitsDiy && (
+            <button
+              onClick={onOpenCircuitsDiy}
+              className="px-2.5 py-1.5 bg-gradient-to-r from-emerald-800/80 to-teal-800/80 hover:from-emerald-700 hover:to-teal-700 text-emerald-100 hover:text-white rounded-lg text-xs font-semibold border border-emerald-500/50 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              title="Search & Import circuits directly from circuits-diy.com into schematic editor"
+            >
+              <Globe className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Circuits-DIY</span>
+            </button>
+          )}
+
+          {/* Component Pinouts, Uses & Missing Part Creator */}
+          {onOpenPinoutModal && (
+            <button
+              onClick={onOpenPinoutModal}
+              className="px-2.5 py-1.5 bg-slate-850 hover:bg-slate-800 text-sky-300 rounded-lg text-xs font-medium border border-sky-500/40 hover:border-sky-400 flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Explore all component pinouts, pin roles, typical uses, and add custom components"
+            >
+              <Cpu className="w-3.5 h-3.5 text-sky-400" />
+              <span>Pinouts &amp; Uses</span>
+            </button>
+          )}
+
+          {/* Circuit Auto-Corrector Engine */}
+          {onOpenAutoCorrectModal && (
+            <button
+              onClick={onOpenAutoCorrectModal}
+              className="px-2.5 py-1.5 bg-gradient-to-r from-indigo-800/70 to-purple-800/70 hover:from-indigo-700 hover:to-purple-700 text-purple-200 hover:text-white rounded-lg text-xs font-semibold border border-purple-500/50 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              title="Auto-correct circuit: fix missing resistors, inductive flyback diodes, decoupling caps, and pin alignment"
+            >
+              <Wand2 className="w-3.5 h-3.5 text-amber-300" />
+              <span>Auto-Correct</span>
+            </button>
+          )}
 
           {/* Google Reference Component Search & Add */}
           {onOpenGoogleModal && (
@@ -473,13 +552,26 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* Export JSON */}
+          {/* Save Circuit */}
+          {onSaveCircuit && (
+            <button
+              onClick={onSaveCircuit}
+              className="px-2.5 py-1.5 bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 hover:text-emerald-100 rounded-lg text-xs font-semibold border border-emerald-700/60 hover:border-emerald-600 flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              title="Save Circuit (Local & Project Storage)"
+            >
+              <Save className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Save</span>
+            </button>
+          )}
+
+          {/* Export / Download JSON */}
           <button
             onClick={onExportJson}
-            className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition-colors cursor-pointer"
-            title="Export Schematic JSON"
+            className="px-2.5 py-1.5 bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs font-semibold border border-slate-700/80 hover:border-slate-600 flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+            title="Download Schematic JSON File"
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-3.5 h-3.5 text-sky-400" />
+            <span>Download</span>
           </button>
 
           {/* GitHub / Vercel Deploy & Export Button */}
@@ -752,11 +844,35 @@ export const Header: React.FC<HeaderProps> = ({
             <span>Rotate (R)</span>
           </button>
 
+          {/* Copy Selected */}
+          {onCopySelected && (
+            <button
+              onClick={onCopySelected}
+              className="px-2 py-1 text-slate-300 hover:text-white hover:bg-slate-800 rounded flex items-center gap-1 transition-colors cursor-pointer"
+              title="Copy Selected Components & Wires (Ctrl+C)"
+            >
+              <Copy className="w-3.5 h-3.5 text-sky-400" />
+              <span>Copy</span>
+            </button>
+          )}
+
+          {/* Paste */}
+          {onPasteSelected && (
+            <button
+              onClick={onPasteSelected}
+              className="px-2 py-1 text-slate-300 hover:text-emerald-300 hover:bg-slate-800 rounded flex items-center gap-1 transition-colors cursor-pointer"
+              title="Paste Components & Wires (Ctrl+V)"
+            >
+              <ClipboardPaste className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Paste</span>
+            </button>
+          )}
+
           {/* Delete Selected */}
           <button
             onClick={onDeleteSelected}
             className="px-2 py-1 text-slate-300 hover:text-red-300 hover:bg-slate-800 rounded flex items-center gap-1 transition-colors cursor-pointer"
-            title="Delete Selected (Del)"
+            title="Delete Selected (Del / Right-Click -> Delete)"
           >
             <Trash2 className="w-3.5 h-3.5 text-rose-400" />
             <span>Delete</span>

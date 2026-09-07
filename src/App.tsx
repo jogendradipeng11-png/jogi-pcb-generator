@@ -41,6 +41,7 @@ import { GitHubDeployModal } from './components/modals/GitHubDeployModal';
 import { AutoCorrectModal } from './components/modals/AutoCorrectModal';
 import { CircuitsDiyExplorerModal } from './components/modals/CircuitsDiyExplorerModal';
 import { ComponentPinoutModal } from './components/modals/ComponentPinoutModal';
+import { ComponentCatalogModal, CatalogModalTab } from './components/modals/ComponentCatalogModal';
 import { LoadDiagramSketchModal } from './components/modals/LoadDiagramSketchModal';
 import { CircuitBrainModal } from './components/modals/CircuitBrainModal';
 import { AiCircuitChatDrawer } from './components/chat/AiCircuitChatDrawer';
@@ -172,6 +173,9 @@ export default function App() {
   const [isLoadDiagramModalOpen, setIsLoadDiagramModalOpen] = useState(false);
   const [isCircuitBrainOpen, setIsCircuitBrainOpen] = useState(false);
   const [isChatDrawerOpen, setIsChatDrawerOpen] = useState(false);
+  const [isComponentCatalogModalOpen, setIsComponentCatalogModalOpen] = useState(false);
+  const [componentCatalogModalTab, setComponentCatalogModalTab] = useState<CatalogModalTab>('components');
+  const [isComponentLibraryCollapsed, setIsComponentLibraryCollapsed] = useState(false);
   const [productSelectorComp, setProductSelectorComp] = useState<SchematicComponent | null>(null);
   const [internalClipboard, setInternalClipboard] = useState<{
     components: SchematicComponent[];
@@ -1366,6 +1370,10 @@ export default function App() {
         onOpenNetlist={() => setIsNetlistOpen(true)}
         onOpenPrintPdf={() => setIsPrintPdfOpen(true)}
         onOpenUniversalModal={() => setIsUniversalModalOpen(true)}
+        onOpenComponentCatalog={() => {
+          setComponentCatalogModalTab('components');
+          setIsComponentCatalogModalOpen(true);
+        }}
         onOpenGoogleModal={() => setIsGoogleModalOpen(true)}
         onExportGerber={handleExportGerber}
         onAutoRoute={handleAutoRoute}
@@ -1438,8 +1446,8 @@ export default function App() {
 
       {/* Main Workspace Body */}
       <div className="flex-1 flex relative overflow-hidden">
-        {/* Left Side: Component Library Palette (available in Schematic mode) */}
-        {viewMode === 'schematic' && (
+        {/* Left Side: Component Library Palette (available in Schematic and PCB modes) */}
+        {(viewMode === 'schematic' || viewMode === 'pcb') && (
           <ComponentLibraryPanel
             onSelectComponentToPlace={(def) => {
               setPlacingDef(def);
@@ -1450,6 +1458,14 @@ export default function App() {
             onOpenAllDataSheetModal={() => handleOpenAllDataSheetModal()}
             onOpenCircuitsDiyModal={() => setIsCircuitsDiyOpen(true)}
             onOpenPinoutModal={() => setIsPinoutModalOpen(true)}
+            onOpenFullCatalogModal={(tab) => {
+              setComponentCatalogModalTab(tab || 'components');
+              setIsComponentCatalogModalOpen(true);
+            }}
+            onLoadCircuit={handleLoadCircuitsDiy}
+            onAppendCircuit={handleAppendCircuitsDiy}
+            isCollapsed={isComponentLibraryCollapsed}
+            onToggleCollapse={() => setIsComponentLibraryCollapsed((prev) => !prev)}
           />
         )}
 
@@ -1730,6 +1746,21 @@ export default function App() {
           setToastMessage(`Imported project: ${importedDoc.title}`);
         }}
         onOpenGitHubModal={() => setIsGitHubModalOpen(true)}
+      />
+
+      {/* Comprehensive Component Catalog Modal Hub */}
+      <ComponentCatalogModal
+        isOpen={isComponentCatalogModalOpen}
+        onClose={() => setIsComponentCatalogModalOpen(false)}
+        initialTab={componentCatalogModalTab}
+        onSelectComponentToPlace={(def) => {
+          setPlacingDef(def);
+          setActiveTool('select');
+          showToast(`Selected "${def.name}". Click on schematic canvas to place.`);
+        }}
+        onLoadCircuit={handleLoadCircuitsDiy}
+        onAppendCircuit={handleAppendCircuitsDiy}
+        onShowToast={showToast}
       />
 
       {/* Google Reference & Custom Component Synthesizer */}

@@ -66,6 +66,7 @@ interface HeaderProps {
   onOpenNetlist: () => void;
   onOpenPrintPdf?: () => void;
   onOpenUniversalModal?: () => void;
+  onOpenComponentCatalog?: () => void;
   onOpenGoogleModal?: () => void;
   onOpenCircuitsDiy?: () => void;
   onOpenPinoutModal?: () => void;
@@ -125,6 +126,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenNetlist,
   onOpenPrintPdf,
   onOpenUniversalModal,
+  onOpenComponentCatalog,
   onOpenGoogleModal,
   onOpenCircuitsDiy,
   onOpenPinoutModal,
@@ -338,10 +340,25 @@ export const Header: React.FC<HeaderProps> = ({
 
           <div className="h-5 w-px bg-slate-800" />
 
+          {/* COMPONENT CATALOG BUTTON - Prominent Hub Access */}
+          {onOpenComponentCatalog && (
+            <button
+              onClick={onOpenComponentCatalog}
+              className="px-3.5 py-1.5 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-sky-950 flex items-center gap-1.5 transition-all cursor-pointer border border-sky-400/30"
+              title="Open Comprehensive Component Catalog (310+ EDA parts, Power Rails, Real DigiKey parts, Circuits-DIY, Datasheets)"
+            >
+              <Cpu className="w-4 h-4 text-sky-200" />
+              <span>Component Catalog</span>
+              <span className="px-1.5 py-0.2 bg-black/30 rounded text-[10px] font-mono text-sky-200 font-bold">
+                310+
+              </span>
+            </button>
+          )}
+
           {/* AI CIRCUIT GENERATOR BUTTON - Prominent CTA */}
           <button
             onClick={onOpenAiModal}
-            className="px-3.5 py-1.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-sky-950 flex items-center gap-1.5 transition-all cursor-pointer"
+            className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-indigo-950 flex items-center gap-1.5 transition-all cursor-pointer"
           >
             <Sparkles className="w-4 h-4 text-amber-300" />
             <span>AI Schematic</span>

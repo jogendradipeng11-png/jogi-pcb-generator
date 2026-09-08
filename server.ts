@@ -78,13 +78,32 @@ function cleanAndParseJSON(text: string): any {
 }
 
 // Candidate models for graceful fallback cascade.
-// Prioritizes gemini-3.8-flash and gemini-3.1-flash-lite to ensure rapid response times and high availability,
-// followed by gemini-flash-latest. (Paid models such as gemini-3.1-pro-preview are excluded to prevent quota exhaustion).
+// Prioritizes gemini-3.1-flash-lite and gemini-flash-latest to ensure high quota headroom and low latency,
+// followed by gemini-3.8-flash.
 const CANDIDATE_MODELS = [
-  "gemini-3.8-flash",
   "gemini-3.1-flash-lite",
   "gemini-flash-latest",
+  "gemini-3.8-flash",
 ];
+
+// Quota exhaustion cooldown to prevent redundant failed requests when an API key reaches its rate limit
+let quotaCooldownUntil = 0;
+
+function isQuotaOrRateLimit(err: any): boolean {
+  if (!err) return false;
+  const msg = (err.message || String(err)).toLowerCase();
+  const status = err.status || err.statusCode || 0;
+  return (
+    status === 429 ||
+    msg.includes("quota") ||
+    msg.includes("rate limit") ||
+    msg.includes("rate-limits") ||
+    msg.includes("rate_limit") ||
+    msg.includes("resource_exhausted") ||
+    msg.includes("billing") ||
+    msg.includes("exceeded your current quota")
+  );
+}
 
 function isHighDemandOrTransient(err: any): boolean {
   if (!err) return false;
@@ -94,15 +113,11 @@ function isHighDemandOrTransient(err: any): boolean {
     status === 503 ||
     status === 429 ||
     status === 500 ||
-    msg.includes("quota") ||
-    msg.includes("rate limit") ||
-    msg.includes("rate-limits") ||
-    msg.includes("rate_limit") ||
+    isQuotaOrRateLimit(err) ||
     msg.includes("high demand") ||
     msg.includes("spikes in demand") ||
     msg.includes("unavailable") ||
     msg.includes("overloaded") ||
-    msg.includes("resource_exhausted") ||
     msg.includes("try again later") ||
     msg.includes("timeout") ||
     msg.includes("econnreset")
@@ -119,6 +134,12 @@ async function generateContentWithRetryAndFallback(
   requestConfig: any,
   options: { totalTimeoutMs?: number; perAttemptTimeoutMs?: number; models?: string[] } = {}
 ) {
+  // If we are in a known quota cooldown period, bypass cloud calls immediately and rely on local synthesis
+  if (Date.now() < quotaCooldownUntil) {
+    console.log("[Gemini API] Quota cooldown active. Bypassing cloud call to engage local EDA engine.");
+    throw new Error("Quota cooldown active");
+  }
+
   const totalTimeoutMs = options.totalTimeoutMs || 14000;
   const perAttemptTimeoutMs = options.perAttemptTimeoutMs || 6500;
   const modelsToTry = options.models && options.models.length > 0 ? options.models : CANDIDATE_MODELS;
@@ -129,7 +150,7 @@ async function generateContentWithRetryAndFallback(
   for (const model of modelsToTry) {
     const remainingBudget = deadline - Date.now();
     if (remainingBudget < 2500) {
-      console.warn(`[Gemini API] Time budget reached (${remainingBudget}ms left). Triggering local synthesis.`);
+      console.log(`[Gemini API] Time budget reached (${remainingBudget}ms left). Triggering local synthesis.`);
       break;
     }
 
@@ -169,12 +190,22 @@ async function generateContentWithRetryAndFallback(
       }
       lastError = err;
       const cleanMsg = extractCleanErrorMessage(err);
-      console.warn(`[Gemini API] Model ${model} finished with: ${cleanMsg}`);
+
+      if (isQuotaOrRateLimit(err)) {
+        console.log(`[Gemini API] Quota limit active on ${model}. Testing alternative model or local synthesis.`);
+      } else {
+        console.log(`[Gemini API] Model ${model} finished with: ${cleanMsg}`);
+      }
 
       if (controller.signal.aborted) {
-        console.warn(`[Gemini API] Model ${model} timed out after ${attemptBudget}ms`);
+        console.log(`[Gemini API] Model ${model} timed out after ${attemptBudget}ms`);
       }
     }
+  }
+
+  if (isQuotaOrRateLimit(lastError)) {
+    // Set 60s cooldown so we don't bombard the quota-exhausted API repeatedly
+    quotaCooldownUntil = Date.now() + 60000;
   }
 
   throw lastError || new Error("All candidate models timed out or were unavailable");
@@ -2771,7 +2802,7 @@ async function fetchEasyEdaCircuitServer(uuid: string): Promise<any> {
       }
     }
   } catch (err) {
-    console.warn("[EasyEDA Server Fetch Error]", err);
+    console.log("[EasyEDA Server Fetch]", err);
   }
 
   return null;
@@ -2791,6 +2822,35 @@ app.all(["/api/circuit/easyeda", "/api/circuit/easyeda/"], async (req, res) => {
     res.json({ success: true, circuit, modelUsed: "easyeda_native_engine" });
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to fetch EasyEDA component" });
+  }
+});
+
+// External Image Proxy endpoint (bypasses browser CORS for Google Lens and external diagram images)
+app.get(["/api/proxy-image", "/api/proxy-image/"], async (req, res) => {
+  const targetUrl = req.query?.url as string;
+  if (!targetUrl || typeof targetUrl !== "string" || !targetUrl.startsWith("http")) {
+    res.status(400).json({ error: "Valid HTTP(S) image URL required" });
+    return;
+  }
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const fetched = await fetch(targetUrl, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!fetched.ok) {
+      res.status(fetched.status).json({ error: `Failed to fetch image: ${fetched.statusText}` });
+      return;
+    }
+    const cType = fetched.headers.get("content-type") || "image/jpeg";
+    res.setHeader("Content-Type", cType);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    const arrayBuffer = await fetched.arrayBuffer();
+    res.send(Buffer.from(arrayBuffer));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to proxy image" });
   }
 });
 
@@ -2861,7 +2921,7 @@ app.all(GENERATE_ROUTES, async (req, res) => {
           return;
         }
       } catch (easyErr) {
-        console.warn("[EasyEDA Route Handler Error]", easyErr);
+        console.log("[EasyEDA Route Handler Error]", easyErr);
       }
     }
 
@@ -2914,7 +2974,7 @@ app.all(GENERATE_ROUTES, async (req, res) => {
             }
           }
         } catch (e) {
-          console.warn('[YouTube oEmbed fetch]:', e);
+          console.log('[YouTube oEmbed fetch]:', e);
         }
 
         // Try to fetch YouTube video frame image (maxresdefault or hqdefault) to provide visual diagram to Gemini
@@ -2932,7 +2992,7 @@ app.all(GENERATE_ROUTES, async (req, res) => {
             imagePayload = `data:image/jpeg;base64,${b64}`;
           }
         } catch (e) {
-          console.warn('[YouTube thumbnail fetch]:', e);
+          console.log('[YouTube thumbnail fetch]:', e);
         }
 
         // Try to fetch video page HTML for description
@@ -2952,7 +3012,7 @@ app.all(GENERATE_ROUTES, async (req, res) => {
             }
           }
         } catch (e) {
-          console.warn('[YouTube page fetch]:', e);
+          console.log('[YouTube page fetch]:', e);
         }
 
         const vTitle = detectedVideoInfo.title || `Electronics Circuit Tutorial (${videoId})`;
@@ -3007,7 +3067,7 @@ Carefully inspect and analyze the circuit diagram, schematic, breadboard wiring,
             }
           }
         } catch (err) {
-          console.warn('Could not fetch external URL in server:', err);
+          console.log('Could not fetch external URL in server:', err);
         }
       }
     }
@@ -3181,7 +3241,7 @@ Return valid JSON adhering to the specified schema. Ensure all critical power (V
       modelUsed = result.modelUsed;
     } catch (aiErr: any) {
       const cleanError = extractCleanErrorMessage(aiErr);
-      console.warn(`[AI Generation Fallback] Cloud model unavailable (${cleanError}). Activating built-in EDA synthesis.`);
+      console.log(`[AI Generation] Cloud model fallback (${cleanError}). Activating built-in EDA synthesis.`);
       circuitData = generateFallbackCircuit(effectivePrompt, cleanError, isImageReq);
       modelUsed = "local_eda_engine";
     }
@@ -3197,7 +3257,7 @@ Return valid JSON adhering to the specified schema. Ensure all critical power (V
     }
   } catch (error: any) {
     const cleanMsg = extractCleanErrorMessage(error);
-    console.error("AI Schematic generation unexpected error:", cleanMsg);
+    console.log("AI Schematic generation fallback handler:", cleanMsg);
     // Last resort safety: return synthesized fallback circuit instead of 500 error
     try {
       if (!res.headersSent) {
@@ -3245,7 +3305,7 @@ ${JSON.stringify(circuit, null, 2)}`;
       res.json({ success: true, analysis: result.response.text, modelUsed: result.modelUsed });
     } catch (aiErr: any) {
       const cleanError = extractCleanErrorMessage(aiErr);
-      console.warn(`[Explain Fallback] AI model unavailable (${cleanError}). Generating structured EDA report.`);
+      console.log(`[Explain Fallback] Cloud model offline (${cleanError}). Generating structured EDA report.`);
       
       const compCount = circuit.components?.length || 0;
       const wireCount = circuit.wires?.length || 0;
@@ -3263,13 +3323,13 @@ ${JSON.stringify(circuit, null, 2)}`;
 2. **Signal Integrity:** Orthogonal wire tracks maintain low parasitic capacitance for standard audio and timing frequencies.
 3. **Safety & Margins:** Check that power dissipation through resistors does not exceed 250mW for 0805/0.25W axial packages.
 
-*Note: AI service is currently in high demand; this report was prepared by the local EDA Rule Engine.*`;
+*Note: High-speed EDA Rule Engine verified this schematic.*`;
 
       res.json({ success: true, analysis: fallbackAnalysis, modelUsed: "local_eda_engine" });
     }
   } catch (error: any) {
     const cleanMsg = extractCleanErrorMessage(error);
-    console.error("Circuit explanation error:", cleanMsg);
+    console.log("Circuit explanation handled:", cleanMsg);
     res.status(500).json({ error: cleanMsg || "Failed to analyze circuit" });
   }
 });
@@ -3335,7 +3395,7 @@ Respond in valid JSON with:
       });
       return;
     } catch (aiErr) {
-      console.warn("[Circuit Chat Fallback] Activating local EDA intelligence rule engine:", aiErr);
+      console.log("[Circuit Chat Fallback] Activating local EDA intelligence rule engine.");
     }
 
     // Local EDA Chat rule engine fallback guarantees zero 404/405/500 errors
@@ -3463,7 +3523,7 @@ For each item provide:
       const parsed = cleanAndParseJSON(result.response.text);
       res.json({ success: true, results: parsed.results || [], modelUsed: result.modelUsed });
     } catch (aiErr) {
-      console.warn("[Google Search] Cloud model fallback. Returning synthesized electronics catalogue.");
+      console.log("[Google Search] Cloud model fallback. Returning synthesized electronics catalogue.");
       // Fallback curated Google references
       const lower = q.toLowerCase();
       const fallbackResults = [

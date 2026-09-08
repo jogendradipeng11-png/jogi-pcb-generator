@@ -33,7 +33,38 @@ export function parseCircuitInfoFromUrl(urlStr: string): { title: string; prompt
     pathname = parsed.pathname;
     queryParams = parsed.search;
 
-    // If YouTube video link e.g. youtube.com/watch?v=... or youtu.be/...
+    // 1. If Google Images or Google Lens result URL
+    if (parsed.hostname.includes('google.') && parsed.searchParams.has('imgurl')) {
+      const imgUrl = parsed.searchParams.get('imgurl') || '';
+      const refUrl = parsed.searchParams.get('imgrefurl') || '';
+      if (imgUrl.startsWith('http')) {
+        const inner = parseCircuitInfoFromUrl(imgUrl);
+        return {
+          title: inner.title || 'Google Lens Circuit Diagram',
+          prompt: `Google Lens diagram: ${inner.prompt} ${refUrl ? `(Source: ${refUrl})` : ''}`,
+          isCircuitUrl: true,
+        };
+      }
+    }
+
+    // 2. Google redirect (google.com/url?url=... or google.com/url?q=...)
+    if (parsed.hostname.includes('google.') && (parsed.searchParams.has('url') || parsed.searchParams.has('q'))) {
+      const innerUrl = parsed.searchParams.get('url') || parsed.searchParams.get('q') || '';
+      if (innerUrl.startsWith('http')) {
+        return parseCircuitInfoFromUrl(innerUrl);
+      }
+    }
+
+    // 3. Google Lens search or gstatic CDN thumbnail
+    if (parsed.hostname.includes('gstatic.com') || parsed.hostname.includes('lens.google')) {
+      return {
+        title: 'Google Lens Circuit Diagram',
+        prompt: `Google Lens diagram image: ${trimmed}. Extract complete circuit schematic with all components and pinout nets.`,
+        isCircuitUrl: true,
+      };
+    }
+
+    // 4. If YouTube video link e.g. youtube.com/watch?v=... or youtu.be/...
     const ytMatch = trimmed.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/);
     if (ytMatch) {
       const videoId = ytMatch[1];
@@ -44,7 +75,7 @@ export function parseCircuitInfoFromUrl(urlStr: string): { title: string; prompt
       };
     }
 
-    // If Google search URL e.g. google.com/search?q=555+timer+circuit
+    // 5. If Google search URL e.g. google.com/search?q=555+timer+circuit
     if (parsed.hostname.includes('google.') && parsed.searchParams.has('q')) {
       const q = parsed.searchParams.get('q') || '';
       const cleanQ = q.replace(/\b(circuit|diagram|schematic|pinout|datasheet)\b/gi, '').trim();
@@ -59,6 +90,16 @@ export function parseCircuitInfoFromUrl(urlStr: string): { title: string; prompt
     }
   } catch {
     pathname = trimmed;
+  }
+
+  // Check for EasyEDA UUID in link
+  const easyUuidMatch = trimmed.match(/\b([0-9a-fA-F]{32})\b/);
+  if (easyUuidMatch && (trimmed.includes('easyeda.com') || trimmed.includes('oshwhub.com'))) {
+    return {
+      title: 'EasyEDA Component Schematic',
+      prompt: `EasyEDA component ${easyUuidMatch[1]} ${trimmed}`,
+      isCircuitUrl: true,
+    };
   }
 
   // Extract slug from URL path
@@ -78,12 +119,21 @@ export function parseCircuitInfoFromUrl(urlStr: string): { title: string; prompt
     ? cleanSlug.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim()
     : 'Web Circuit Schematic';
 
-  if (!title || title.length < 3) {
-    title = 'Synthesized Web Circuit';
+  if (!title || title.length < 3 || title.toLowerCase() === 'images' || title.toLowerCase() === 'image') {
+    title = 'Google Lens Circuit Diagram';
   }
 
   const prompt = `${title} ${cleanSlug} ${trimmed}`;
+  const isImageExt =
+    /\.(png|jpe?g|webp|svg|gif|bmp)(\?.*)?$/i.test(trimmed) ||
+    trimmed.includes('gstatic.com') ||
+    trimmed.includes('easyeda.com') ||
+    trimmed.includes('lens.google') ||
+    trimmed.includes('imgur.com') ||
+    trimmed.includes('/images/');
+
   const isCircuitUrl =
+    isImageExt ||
     /circuit|schematic|diy|sensor|timer|555|charger|relay|opto|moc30|triac|ssr|regulator|amplifier|transistor|led|arduino|esp32|microcontroller|inverter|switch|power/i.test(
       trimmed
     );
@@ -213,7 +263,13 @@ export async function importCircuitFromUrlOrText(textOrUrl: string): Promise<Imp
   }
 
   const { title, prompt } = parseCircuitInfoFromUrl(textOrUrl);
-  const isImageUrl = /\.(png|jpe?g|webp|svg|gif|bmp)(\?.*)?$/i.test(textOrUrl) || textOrUrl.includes('imgur.com') || textOrUrl.includes('/images/');
+  const isImageUrl =
+    /\.(png|jpe?g|webp|svg|gif|bmp)(\?.*)?$/i.test(textOrUrl) ||
+    textOrUrl.includes('imgur.com') ||
+    textOrUrl.includes('/images/') ||
+    textOrUrl.includes('gstatic.com') ||
+    textOrUrl.includes('lens.google') ||
+    textOrUrl.includes('easyeda.com');
 
   // Try server-side generation with online URL / image link
   try {
@@ -223,9 +279,12 @@ export async function importCircuitFromUrlOrText(textOrUrl: string): Promise<Imp
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        prompt: `Generate schematic circuit from URL reference: ${prompt}`,
+        prompt: isImageUrl
+          ? `Circuit diagram image from Google Lens / web: ${prompt}`
+          : `Generate schematic circuit from URL reference: ${prompt}`,
         url: textOrUrl,
-        image: isImageUrl ? textOrUrl : undefined,
+        imageUrl: textOrUrl,
+        image: textOrUrl,
       }),
       signal: controller.signal,
     });

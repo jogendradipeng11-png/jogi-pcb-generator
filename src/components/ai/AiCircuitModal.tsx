@@ -176,7 +176,7 @@ export const AiCircuitModal: React.FC<AiCircuitModalProps> = ({
 
       // If network fetch failed or timed out, recover immediately with client EDA synthesis
       if (!response) {
-        console.warn('Backend fetch failed or timed out. Activating Instant Client EDA Synthesizer...', lastFetchErr);
+        console.log('Backend fetch unavailable. Activating Instant Client EDA Synthesizer...', lastFetchErr);
         const clientDoc = synthesizeClientCircuit(textToUse);
         setModelUsed('Instant Local EDA Synthesizer');
         setIsFallbackUsed(true);
@@ -197,7 +197,7 @@ export const AiCircuitModal: React.FC<AiCircuitModalProps> = ({
           response.status === 503 ||
           response.status === 504
         ) {
-          console.warn(`[Auto-Recovery] Server responded with status ${response.status}. Activating Instant Client EDA Synthesizer...`);
+          console.log(`[Auto-Recovery] Server status ${response.status}. Activating Instant Client EDA Synthesizer...`);
           const clientDoc = synthesizeClientCircuit(textToUse);
           setModelUsed('Instant Client EDA Synthesizer');
           setIsFallbackUsed(true);
@@ -257,7 +257,6 @@ export const AiCircuitModal: React.FC<AiCircuitModalProps> = ({
 
       setGeneratedCircuit(doc);
     } catch (err: any) {
-      console.error('Generation failure:', err);
       let cleanMsg = err.message || 'Failed to synthesize circuit schematic';
       try {
         if (cleanMsg.includes('{') && cleanMsg.includes('}')) {
@@ -272,12 +271,20 @@ export const AiCircuitModal: React.FC<AiCircuitModalProps> = ({
         // use cleanMsg as-is
       }
 
-      // Check if this was a network, 404/static host, or demand failure, and auto-recover with client EDA synthesizer
+      // Check if this was a network, quota, 404/static host, or demand failure, and auto-recover with client EDA synthesizer
       const isNetworkOrDemand =
         cleanMsg.toLowerCase().includes('failed to fetch') ||
         cleanMsg.toLowerCase().includes('network') ||
         cleanMsg.toLowerCase().includes('aborted') ||
+        cleanMsg.toLowerCase().includes('quota') ||
+        cleanMsg.toLowerCase().includes('rate limit') ||
+        cleanMsg.toLowerCase().includes('rate-limit') ||
+        cleanMsg.toLowerCase().includes('resource_exhausted') ||
+        cleanMsg.toLowerCase().includes('exceeded') ||
+        cleanMsg.toLowerCase().includes('billing') ||
         cleanMsg.toLowerCase().includes('404') ||
+        cleanMsg.toLowerCase().includes('429') ||
+        cleanMsg.toLowerCase().includes('500') ||
         cleanMsg.toLowerCase().includes('502') ||
         cleanMsg.toLowerCase().includes('503') ||
         cleanMsg.toLowerCase().includes('504') ||
@@ -286,9 +293,9 @@ export const AiCircuitModal: React.FC<AiCircuitModalProps> = ({
         cleanMsg.toLowerCase().includes('high demand');
 
       if (isNetworkOrDemand) {
-        console.warn(`[Auto-Recovery] (${cleanMsg}). Generating valid circuit via Instant Local EDA Synthesizer.`);
+        console.log(`[Auto-Recovery] Cloud model offline (${cleanMsg}). Generating valid circuit via Instant Local EDA Synthesizer.`);
         const clientDoc = synthesizeClientCircuit(textToUse);
-        setModelUsed('Instant Client EDA Synthesizer (Zero-Latency)');
+        setModelUsed('Instant Client EDA Synthesizer (Offline Resilient)');
         setIsFallbackUsed(true);
         setGeneratedCircuit(clientDoc);
         setError(null);

@@ -281,13 +281,20 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
 
         const isHttpUrl = cleanPasted.startsWith('http');
         const isYt = cleanPasted.includes('youtube') || cleanPasted.includes('youtu.be');
+        const isImgUrl =
+          /\.(png|jpe?g|webp|svg|gif|bmp)(\?.*)?$/i.test(cleanPasted) ||
+          cleanPasted.includes('gstatic.com') ||
+          cleanPasted.includes('lens.google') ||
+          cleanPasted.includes('easyeda.com') ||
+          cleanPasted.includes('imgur.com');
 
         const res = await fetch('/api/circuit/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt: promptForBackend,
-            image: activeImage || undefined,
+            image: activeImage || (isImgUrl ? cleanPasted : undefined),
+            imageUrl: isImgUrl ? cleanPasted : undefined,
             url: isHttpUrl ? cleanPasted : undefined,
             videoUrl: isYt ? cleanPasted : undefined,
           }),

@@ -7,6 +7,7 @@ import { synthesizeClientCircuit } from './clientEdaSynthesizer';
 import { autoRouteSchematicNets } from './autorouter';
 import { autoLayoutPcbComponents } from './pcbPlacement';
 import { learnCircuit } from './circuitBrainLearner';
+import { isEasyEdaUrlOrUuid, fetchAndParseEasyEdaCircuit } from './easyEdaParser';
 
 export interface ImportedCircuitResult {
   title: string;
@@ -190,6 +191,27 @@ export async function importCircuitFromImageDataUrl(dataUrl: string): Promise<Im
  * Generates an authentic schematic from a web URL or circuit link (from "Copy Link Address" or "Copy URL").
  */
 export async function importCircuitFromUrlOrText(textOrUrl: string): Promise<ImportedCircuitResult> {
+  // If EasyEDA URL, image address, or 32-character UUID, parse components directly
+  if (isEasyEdaUrlOrUuid(textOrUrl)) {
+    try {
+      const easyedaDoc = await fetchAndParseEasyEdaCircuit(textOrUrl);
+      if (easyedaDoc && easyedaDoc.components && easyedaDoc.components.length > 0) {
+        learnCircuit(easyedaDoc);
+        return {
+          title: easyedaDoc.title,
+          summary: easyedaDoc.summary,
+          category: easyedaDoc.category,
+          components: easyedaDoc.components,
+          wires: easyedaDoc.wires,
+          sourceType: 'url',
+          rawSource: textOrUrl,
+        };
+      }
+    } catch (easyErr) {
+      console.warn('[Clipboard Importer] Direct EasyEDA parsing error:', easyErr);
+    }
+  }
+
   const { title, prompt } = parseCircuitInfoFromUrl(textOrUrl);
   const isImageUrl = /\.(png|jpe?g|webp|svg|gif|bmp)(\?.*)?$/i.test(textOrUrl) || textOrUrl.includes('imgur.com') || textOrUrl.includes('/images/');
 

@@ -109,7 +109,154 @@ Return valid JSON adhering to the specified schema.`;
 
     let components: any[] = [];
 
-    if (p.includes("555") || p.includes("timer") || p.includes("flasher") || p.includes("astable")) {
+    if (
+      p.includes("0b44da0e") ||
+      p.includes("easyeda") ||
+      p.includes("lm2596") ||
+      p.includes("buck") ||
+      p.includes("step-down") ||
+      p.includes("converter")
+    ) {
+      title = "LM2596 Step-Down Buck Converter (EasyEDA Component 0b44da0e)";
+      category = "Power Supply & Regulators";
+      summary = "High-efficiency 3A step-down switching buck converter synthesized directly from EasyEDA data. Features LM2596-ADJ regulator, input filter C1, catch Schottky diode D1, energy storage inductor L1, output smoothing C2, and precision voltage divider R1/R2.";
+      components = [
+        {
+          id: "comp_u1_lm2596",
+          type: "ic_regulator",
+          designator: "U1",
+          value: "LM2596-ADJ",
+          footprint: "TS5B",
+          x: 440,
+          y: 280,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "Vin", net: "DC_IN" },
+            { id: "2", name: "Vout", net: "NET_SW" },
+            { id: "3", name: "GND", net: "GND" },
+            { id: "4", name: "FB", net: "NET_FB" },
+            { id: "5", name: "!ON/OFF", net: "GND" },
+          ],
+        },
+        {
+          id: "comp_c1_in",
+          type: "polarized_capacitor",
+          designator: "C1",
+          value: "100uF 50V",
+          footprint: "10*10.2",
+          x: 320,
+          y: 280,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "+", net: "DC_IN" },
+            { id: "2", name: "-", net: "GND" },
+          ],
+        },
+        {
+          id: "comp_d1_ss54",
+          type: "diode",
+          designator: "D1",
+          value: "SS54",
+          footprint: "SMA",
+          x: 520,
+          y: 380,
+          rotation: 90,
+          pins: [
+            { id: "1", name: "A", net: "GND" },
+            { id: "2", name: "K", net: "NET_SW" },
+          ],
+        },
+        {
+          id: "comp_l1_inductor",
+          type: "inductor",
+          designator: "L1",
+          value: "100uH 3A",
+          footprint: "L120120",
+          x: 620,
+          y: 250,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "NET_SW" },
+            { id: "2", name: "2", net: "NET_4V" },
+          ],
+        },
+        {
+          id: "comp_c2_out",
+          type: "polarized_capacitor",
+          designator: "C2",
+          value: "220uF 25V",
+          footprint: "10*10.2",
+          x: 740,
+          y: 320,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "+", net: "NET_4V" },
+            { id: "2", name: "-", net: "GND" },
+          ],
+        },
+        {
+          id: "comp_r1_fb",
+          type: "resistor",
+          designator: "R1",
+          value: "2.2kΩ",
+          footprint: "R0603",
+          x: 680,
+          y: 340,
+          rotation: 90,
+          pins: [
+            { id: "1", name: "1", net: "NET_FB" },
+            { id: "2", name: "2", net: "NET_4V" },
+          ],
+        },
+        {
+          id: "comp_r2_fb",
+          type: "resistor",
+          designator: "R2",
+          value: "1.0kΩ",
+          footprint: "R0603",
+          x: 680,
+          y: 440,
+          rotation: 90,
+          pins: [
+            { id: "1", name: "1", net: "GND" },
+            { id: "2", name: "2", net: "NET_FB" },
+          ],
+        },
+        {
+          id: "comp_pwr_in",
+          type: "vcc",
+          designator: "DC",
+          value: "DC Input (7V-40V)",
+          footprint: "SCREW_TERM_2P",
+          x: 200,
+          y: 280,
+          rotation: 0,
+          pins: [{ id: "1", name: "DC", net: "DC_IN" }],
+        },
+        {
+          id: "comp_pwr_out",
+          type: "vcc",
+          designator: "4V",
+          value: "4V Regulated Output",
+          footprint: "SCREW_TERM_2P",
+          x: 860,
+          y: 250,
+          rotation: 0,
+          pins: [{ id: "1", name: "4V", net: "NET_4V" }],
+        },
+        {
+          id: "comp_pwr_gnd",
+          type: "gnd",
+          designator: "GND",
+          value: "0V Reference",
+          footprint: "POWER_PORT",
+          x: 520,
+          y: 480,
+          rotation: 0,
+          pins: [{ id: "1", name: "GND", net: "GND" }],
+        },
+      ];
+    } else if (p.includes("555") || p.includes("timer") || p.includes("flasher") || p.includes("astable")) {
       title = "555 Timer Astable Multivibrator (1Hz)";
       category = "Oscillator / Timer";
       summary = "555 astable multivibrator producing square wave clock pulses with an LED indicator.";

@@ -29,6 +29,7 @@ import { autoLayoutPcbComponents } from '../../utils/pcbPlacement';
 import { learnCircuit } from '../../utils/circuitBrainLearner';
 import { exportCircuitToPdf } from '../../utils/pdfExport';
 import { generateGerberZip } from '../../utils/gerber';
+import { isEasyEdaUrlOrUuid, fetchAndParseEasyEdaCircuit } from '../../utils/easyEdaParser';
 
 interface LoadDiagramSketchModalProps {
   isOpen: boolean;
@@ -240,6 +241,24 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
       effectivePrompt = 'Electronic circuit schematic';
     }
 
+    // 0. Direct check for EasyEDA URL or UUID
+    const combinedSource = `${pastedTextOrUrl} ${circuitPrompt} ${activeImage || ''}`;
+    if (isEasyEdaUrlOrUuid(combinedSource)) {
+      setStatusMessage('Extracting EasyEDA component library, verified footprints, pin definitions, and wiring nets...');
+      try {
+        const easyDoc = await fetchAndParseEasyEdaCircuit(combinedSource);
+        if (easyDoc && easyDoc.components && easyDoc.components.length > 0) {
+          learnCircuit(easyDoc);
+          setPreviewCircuit(easyDoc);
+          setStatusMessage(`Successfully synthesized ${easyDoc.components.length} components and ${easyDoc.wires.length} wires from EasyEDA data!`);
+          setIsProcessing(false);
+          return;
+        }
+      } catch (easyErr) {
+        console.warn('[EasyEDA Direct Synthesis Error]:', easyErr);
+      }
+    }
+
     try {
       // 1. First attempt to call the multimodal synthesis backend
       // Provide adequate time budget for multimodal vision reasoning (15-45s)
@@ -261,6 +280,8 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
           body: JSON.stringify({
             prompt: promptForBackend,
             image: activeImage || undefined,
+            url: pastedTextOrUrl.startsWith('http') ? pastedTextOrUrl.trim() : undefined,
+            videoUrl: (pastedTextOrUrl.includes('youtube') || pastedTextOrUrl.includes('youtu.be')) ? pastedTextOrUrl.trim() : undefined,
           }),
           signal: controller.signal,
         });
@@ -288,8 +309,12 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
             }));
 
             const placedComps = autoLayoutPcbComponents(comps);
+            const rawWires: Wire[] = Array.isArray(raw.wires) ? raw.wires : [];
             // Auto-route nets into clean orthogonal wires
-            const autoRouted = autoRouteSchematicNets(placedComps, []);
+            const autoRouted = autoRouteSchematicNets(placedComps, rawWires);
+            const finalWires = (autoRouted.allWires && autoRouted.allWires.length > 0)
+              ? autoRouted.allWires
+              : (autoRouted.newWires.length > 0 ? autoRouted.newWires : rawWires);
 
             const doc: SchematicDocument = {
               id: `doc_${Date.now()}`,
@@ -297,7 +322,7 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
               summary: raw.summary || 'Schematic extracted accurately from diagram / rough sketch.',
               category: raw.category || 'Diagram Synthesis',
               components: placedComps,
-              wires: autoRouted.newWires,
+              wires: finalWires,
               version: 1,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
@@ -306,7 +331,7 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
             learnCircuit(doc);
             setPreviewCircuit(doc);
             serverSuccess = true;
-            setStatusMessage(`Successfully synthesized ${placedComps.length} components and ${autoRouted.newWires.length} wires!`);
+            setStatusMessage(`Successfully synthesized ${placedComps.length} components and ${finalWires.length} wires!`);
           }
         }
       } catch (serverErr) {
@@ -323,27 +348,35 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
           : (activeImage ? 'ESP8266 NodeMCU 4-Channel Relay Home Automation with DHT11, IR Receiver, 2 Push Buttons, and 18650 Battery Cirkit Designer' : (imageFileName || 'Diagram Schematic'));
         const clientDoc = synthesizeClientCircuit(promptToUse, imageFileName || 'Diagram Schematic');
         const placedClientComps = autoLayoutPcbComponents(clientDoc.components || []);
-        const clientRouted = autoRouteSchematicNets(placedClientComps, []);
+        const clientRouted = autoRouteSchematicNets(placedClientComps, clientDoc.wires || []);
+        const clientFinalWires = (clientRouted.allWires && clientRouted.allWires.length > 0)
+          ? clientRouted.allWires
+          : (clientRouted.newWires.length > 0 ? clientRouted.newWires : (clientDoc.wires || []));
+
         const doc: SchematicDocument = {
           ...clientDoc,
           components: placedClientComps,
-          wires: clientRouted.newWires,
+          wires: clientFinalWires,
         };
 
         learnCircuit(doc);
         setPreviewCircuit(doc);
-        setStatusMessage(`Synthesized ${placedClientComps.length} components and ${clientRouted.newWires.length} wires with verified pinouts!`);
+        setStatusMessage(`Synthesized ${placedClientComps.length} components and ${clientFinalWires.length} wires with verified pinouts!`);
       }
     } catch (err: any) {
       console.error('[Diagram Synthesizer] Error:', err);
       // Fallback guarantees it never fails
       const fallbackDoc = synthesizeClientCircuit(circuitPrompt || 'ESP8266 NodeMCU 4-Channel Relay Cirkit Designer');
       const placedFallbackComps = autoLayoutPcbComponents(fallbackDoc.components || []);
-      const routedFallback = autoRouteSchematicNets(placedFallbackComps, []);
+      const routedFallback = autoRouteSchematicNets(placedFallbackComps, fallbackDoc.wires || []);
+      const fallbackFinalWires = (routedFallback.allWires && routedFallback.allWires.length > 0)
+        ? routedFallback.allWires
+        : (routedFallback.newWires.length > 0 ? routedFallback.newWires : (fallbackDoc.wires || []));
+
       const doc: SchematicDocument = {
         ...fallbackDoc,
         components: placedFallbackComps,
-        wires: routedFallback.newWires,
+        wires: fallbackFinalWires,
       };
       learnCircuit(doc);
       setPreviewCircuit(doc);
@@ -620,15 +653,18 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
           {activeTab === 'paste' && (
             <div className="space-y-3">
               <label className="text-xs text-slate-300 font-medium block">
-                Paste Web Circuit URL, Circuits-DIY Link, or Text Description:
+                Paste EasyEDA Image / Component URL, YouTube Video Link, Web Circuit, or Text Description:
               </label>
               <textarea
                 value={pastedTextOrUrl}
                 onChange={(e) => setPastedTextOrUrl(e.target.value)}
-                placeholder="e.g. https://www.circuits-diy.com/555-timer-flasher-circuit/ OR describe: 'LM358 non-inverting amplifier with gain of 10, 9V single supply, 10k feedback resistor, 1k ground resistor, and 10uF AC coupling capacitor'"
+                placeholder="e.g. https://image.easyeda.com/components/0b44da0e66aa4101b02e0973e40419f8.png OR YouTube video URL OR https://www.circuits-diy.com/555-timer-flasher-circuit/ OR describe components..."
                 rows={4}
                 className="w-full bg-slate-950 border border-slate-750 rounded-lg p-3 text-xs text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-sky-500 font-mono"
               />
+              <p className="text-[11px] text-slate-400">
+                Supports EasyEDA component image links (e.g. <code className="text-emerald-400 font-mono">image.easyeda.com/components/UUID.png</code>), YouTube video links, web circuit diagrams, and natural language prompts.
+              </p>
             </div>
           )}
 
@@ -642,12 +678,23 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
               type="text"
               value={circuitPrompt}
               onChange={(e) => setCircuitPrompt(e.target.value)}
-              placeholder="e.g. ESP8266 NodeMCU, 4-Channel Relay Module, DHT11, IR Receiver, Push Buttons, 18650 Battery"
+              placeholder="e.g. LM2596 Step-Down Buck Converter, ESP8266 NodeMCU, 4-Channel Relay, etc."
               className="w-full bg-slate-950 border border-slate-750 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-sky-500"
             />
             {/* Quick Equipment Presets / Detected Equipments */}
             <div className="flex flex-wrap items-center gap-1.5 pt-1">
-              <span className="text-[11px] text-slate-400 font-medium">Quick Equipment Presets:</span>
+              <span className="text-[11px] text-slate-400 font-medium">Quick Presets:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setPastedTextOrUrl('https://image.easyeda.com/components/0b44da0e66aa4101b02e0973e40419f8.png');
+                  setCircuitPrompt('EasyEDA LM2596 Step-Down Buck Converter (0b44da0e)');
+                  setActiveTab('paste');
+                }}
+                className="text-[10.5px] px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 border border-emerald-700/60 text-emerald-300 transition-colors cursor-pointer"
+              >
+                ⚡ EasyEDA: LM2596 Buck Converter (0b44da0e)
+              </button>
               <button
                 type="button"
                 onClick={() => setCircuitPrompt('ESP8266 NodeMCU 4-Channel Relay Home Automation with DHT11, IR Receiver, 2 Push Buttons, and 18650 Battery (Cirkit Designer)')}

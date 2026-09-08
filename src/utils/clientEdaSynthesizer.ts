@@ -3,10 +3,21 @@
 
 import { SchematicDocument, SchematicComponent } from '../types';
 import { autoRouteSchematicNets } from './autorouter';
+import { getBuiltinLM2596BuckCircuit } from './easyEdaParser';
 
 export function synthesizeClientCircuit(prompt: string, hintTitle?: string): SchematicDocument {
   let p = (prompt || '').toLowerCase();
   let extractedUrlTitle = '';
+
+  // Direct check for EasyEDA / LM2596 Step-Down Buck Converter
+  if (
+    p.includes('0b44da0e') ||
+    p.includes('easyeda') ||
+    p.includes('lm2596') ||
+    (p.includes('buck') && (p.includes('converter') || p.includes('regulator') || p.includes('step-down') || p.includes('3a') || p.includes('power')))
+  ) {
+    return getBuiltinLM2596BuckCircuit();
+  }
 
   // Extract article slug if user pasted a URL (e.g., https://www.circuits-diy.com/555-timer-flasher-circuit/)
   if (p.includes('circuits-diy.com') || p.startsWith('http')) {

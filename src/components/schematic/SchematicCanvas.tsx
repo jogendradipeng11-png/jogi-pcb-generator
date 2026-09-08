@@ -35,7 +35,10 @@ import {
   AlertCircle,
   Magnet,
   ClipboardPaste,
+  Activity,
+  Zap,
 } from 'lucide-react';
+import { RealProductImage, getRealProductDetails } from '../../utils/componentImages';
 import {
   snapToGrid,
   snapPoint,
@@ -170,6 +173,9 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
 
   // Schematic Section Demarcation Visibility (Source Section & Load Section)
   const [showSectionZones, setShowSectionZones] = useState(true);
+
+  // Live Working Animated View toggle (active electron flow and component dynamics)
+  const [isLiveWorkingAnimation, setIsLiveWorkingAnimation] = useState(true);
 
   // Full Circuit & Selected Components Rotation Handler (0°, 90° CW, 90° CCW, 180°, Flip H, Flip V)
   const handleRotateCircuit = useCallback(
@@ -1700,17 +1706,17 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
                   </g>
                 )}
 
-                {/* Animated Current Flow (Moving electrons) */}
-                {isSimulating && simulationState && currentVal > 0.0001 && (
+                {/* Animated Current Flow (Moving electrons in real working schematic view) */}
+                {(isLiveWorkingAnimation || (isSimulating && simulationState && currentVal > 0.0001)) && (
                   <path
                     d={pathStr}
                     fill="none"
                     stroke="#fef08a"
                     strokeWidth="2.5"
                     strokeDasharray="4 8"
-                    strokeDashoffset={-simulationState.time * 65}
+                    strokeDashoffset={simulationState ? -simulationState.time * 65 : undefined}
                     strokeOpacity="0.85"
-                    className="pointer-events-none"
+                    className={`pointer-events-none ${!simulationState ? 'animate-current-flow' : ''}`}
                   />
                 )}
 
@@ -1793,6 +1799,7 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
                 hoveredPinId={hoveredPin?.componentId === comp.id ? hoveredPin.pinId : null}
                 simulationResult={simResult}
                 isSimulating={isSimulating}
+                isLiveWorking={isLiveWorkingAnimation}
                 onToggleSwitch={onToggleSwitch}
                 probedPinId={
                   activeProbe?.type === 'pin' && activeProbe.componentId === comp.id
@@ -2478,15 +2485,14 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
         if (!comp) return null;
         const def = getComponentDef(comp.type);
         const compSim = simulationState?.componentResults?.[comp.id];
+        const realDetails = getRealProductDetails(comp);
 
         return (
           <div className="absolute bottom-12 right-4 w-80 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl overflow-hidden z-20 font-sans animate-in fade-in slide-in-from-bottom-2">
             {/* Header */}
             <div className="flex items-center justify-between px-3.5 py-2.5 bg-slate-800/80 border-b border-slate-700">
-              <div className="flex items-center gap-2">
-                <div className="p-1 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">
-                  <Cpu className="w-4 h-4" />
-                </div>
+              <div className="flex items-center gap-2.5">
+                <RealProductImage component={comp} className="w-10 h-10 rounded-lg border border-slate-700 bg-slate-950 p-0.5 object-contain flex-shrink-0 shadow-inner" />
                 <div>
                   <div className="flex items-center gap-1.5">
                     <span className="font-bold text-sm text-sky-300 font-mono">{comp.designator}</span>
@@ -2508,7 +2514,31 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
 
             {/* Body */}
             {isDetailsCardExpanded && (
-              <div className="p-3 space-y-3 text-xs">
+              <div className="p-3 space-y-2.5 text-xs">
+                {/* Authentic Component Specs */}
+                <div className="bg-slate-950/70 p-2.5 rounded-lg border border-emerald-900/40 text-[11px] space-y-1">
+                  <div className="flex items-center justify-between text-[10px] uppercase font-bold text-emerald-400">
+                    <span>Authentic Component Product</span>
+                    <span className="font-mono text-slate-400 text-[9px]">{realDetails.package}</span>
+                  </div>
+                  <div className="flex justify-between py-0.5 text-slate-300">
+                    <span className="text-slate-400">Part (MPN):</span>
+                    <span className="text-amber-300 font-mono font-medium">{realDetails.partNumber}</span>
+                  </div>
+                  <div className="flex justify-between py-0.5 text-slate-300">
+                    <span className="text-slate-400">Manufacturer:</span>
+                    <span>{realDetails.manufacturer}</span>
+                  </div>
+                  <div className="flex justify-between py-0.5 text-slate-300">
+                    <span className="text-slate-400">Supplier &amp; SKU:</span>
+                    <span className="text-sky-300 font-mono">{realDetails.supplier} ({realDetails.supplierPartNumber})</span>
+                  </div>
+                  <div className="flex justify-between py-0.5 text-slate-300">
+                    <span className="text-slate-400">Estimated Unit Cost:</span>
+                    <span className="text-emerald-400 font-mono font-semibold">{realDetails.unitPrice}</span>
+                  </div>
+                </div>
+
                 {/* Value & Package Details */}
                 <div className="grid grid-cols-2 gap-2 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
                   <div>
@@ -2765,6 +2795,20 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
         >
           <Radio className="w-3 h-3 text-sky-400" />
           <span>{activeProbe ? `Probe: ${activeProbe.label.slice(0, 12)}…` : 'Click to Probe [P]'}</span>
+        </button>
+
+        <div className="h-3 w-px bg-slate-700" />
+        <button
+          onClick={() => setIsLiveWorkingAnimation(!isLiveWorkingAnimation)}
+          className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono cursor-pointer transition-colors border ${
+            isLiveWorkingAnimation
+              ? 'bg-amber-950/80 text-amber-300 border-amber-600/60'
+              : 'hover:bg-slate-800 text-slate-400 border-slate-700'
+          }`}
+          title="Toggle animated real working schematic current flow and active component dynamics"
+        >
+          <Activity className={`w-3 h-3 ${isLiveWorkingAnimation ? 'text-amber-400 animate-pulse' : 'text-slate-500'}`} />
+          <span>Working: {isLiveWorkingAnimation ? 'Live Animated Flow' : 'Static'}</span>
         </button>
 
         {onPasteFromClipboard && (

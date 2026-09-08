@@ -20,6 +20,9 @@ import {
   RotateCw,
   RotateCcw,
   FlipVertical,
+  Eye,
+  Activity,
+  Zap,
 } from 'lucide-react';
 import { generateGerberZip } from '../../utils/gerber';
 import {
@@ -27,6 +30,12 @@ import {
   syncAllFromSchematic,
   autoArrangeBestFit,
 } from '../../utils/pcbPlacement';
+import {
+  RealProductImage,
+  getRealProductDetails,
+  RealisticComponentSvg,
+  getComponentRealImageUrl,
+} from '../../utils/componentImages';
 
 interface Pcb3DViewerProps {
   components: SchematicComponent[];
@@ -54,13 +63,18 @@ export const Pcb3DViewer: React.FC<Pcb3DViewerProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
-  // Board Aesthetics
+  // Board Aesthetics & Real Electronics Mode
   const [solderMaskColor, setSolderMaskColor] = useState<'green' | 'black' | 'blue' | 'purple' | 'red'>('green');
   const [showEnclosure, setShowEnclosure] = useState(false);
   const [enclosureType, setEnclosureType] = useState<'acrylic' | 'aluminum'>('acrylic');
   const [selectedCompId, setSelectedCompId] = useState<string | null>(null);
   const [isExportingGerber, setIsExportingGerber] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
+
+  // Real Electronics Products & Animated Working Simulation
+  const [showReal3DTextures, setShowReal3DTextures] = useState(true);
+  const [showWorkingSimulation, setShowWorkingSimulation] = useState(true);
+  const [hovered3DComp, setHovered3DComp] = useState<any | null>(null);
 
   // 3D Drag & Arrange state
   const [isArrangeMode, setIsArrangeMode] = useState(false);
@@ -383,6 +397,34 @@ export const Pcb3DViewer: React.FC<Pcb3DViewerProps> = ({
             ))}
           </div>
 
+          {/* Real 3D Electronic Products & Live Working Animation Toggles */}
+          <div className="flex items-center space-x-1 bg-slate-900/90 p-0.5 rounded-lg border border-slate-700/80 text-xs">
+            <button
+              onClick={() => setShowReal3DTextures(!showReal3DTextures)}
+              className={`px-2.5 py-1 rounded font-medium flex items-center gap-1.5 cursor-pointer transition-colors ${
+                showReal3DTextures
+                  ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-500/50 shadow-xs'
+                  : 'text-slate-400 hover:bg-slate-800'
+              }`}
+              title="Toggle between Real Physical Electronic Product Views and Abstract 3D Shapes"
+            >
+              <Eye className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{showReal3DTextures ? 'Real 3D Products' : 'Abstract 3D'}</span>
+            </button>
+            <button
+              onClick={() => setShowWorkingSimulation(!showWorkingSimulation)}
+              className={`px-2.5 py-1 rounded font-medium flex items-center gap-1.5 cursor-pointer transition-colors ${
+                showWorkingSimulation
+                  ? 'bg-amber-950/90 text-amber-300 border border-amber-500/50 shadow-xs'
+                  : 'text-slate-400 hover:bg-slate-800'
+              }`}
+              title="Toggle Animated Real Working Electrical Current Along 3D Board Traces & Active Indicators"
+            >
+              <Activity className={`w-3.5 h-3.5 ${showWorkingSimulation ? 'text-amber-400 animate-pulse' : 'text-slate-500'}`} />
+              <span>{showWorkingSimulation ? '3D Working Flow: Active' : 'Flow: Off'}</span>
+            </button>
+          </div>
+
           {/* Mode Switch: 3D Orbit vs 3D Drag & Arrange */}
           <div className="flex items-center bg-slate-800 rounded-md p-0.5 border border-slate-700">
             <button
@@ -565,11 +607,35 @@ export const Pcb3DViewer: React.FC<Pcb3DViewerProps> = ({
                     </g>
                   );
                 })}
+
+                {/* Animated Working Current Flow Along 3D Board Traces */}
+                {showWorkingSimulation && (
+                  <g className="pointer-events-none">
+                    {traces.map((tr, i) => {
+                      const midX = (tr.x1 + tr.x2) / 2;
+                      return (
+                        <path
+                          key={`3d-flow-${i}`}
+                          d={`M ${tr.x1} ${tr.y1} L ${midX} ${tr.y1} L ${midX} ${tr.y2} L ${tr.x2} ${tr.y2}`}
+                          fill="none"
+                          stroke="#fef08a"
+                          strokeWidth="2.4"
+                          strokeDasharray="4 8"
+                          className="animate-current-flow"
+                          opacity="0.95"
+                        />
+                      );
+                    })}
+                  </g>
+                )}
               </svg>
 
               {/* 3D Components on the Board */}
               {pcbItems.map((comp, compIdx) => {
                 const isSelected = selectedCompId === comp.id;
+                const norm = (comp.type + ' ' + (comp.value || '') + ' ' + (comp.footprint || '')).toLowerCase();
+                const realDetails = getRealProductDetails(comp);
+                const realPhotoUrl = getComponentRealImageUrl(comp);
 
                 return (
                   <div
@@ -579,6 +645,8 @@ export const Pcb3DViewer: React.FC<Pcb3DViewerProps> = ({
                       setSelectedCompId(comp.id);
                       if (onSelectComponent) onSelectComponent(comp.id);
                     }}
+                    onMouseEnter={() => setHovered3DComp(comp)}
+                    onMouseLeave={() => setHovered3DComp((c: any) => (c?.id === comp.id ? null : c))}
                     onMouseDown={(e) => {
                       if (isArrangeMode) {
                         e.stopPropagation();
@@ -603,15 +671,215 @@ export const Pcb3DViewer: React.FC<Pcb3DViewerProps> = ({
                       isArrangeMode ? 'cursor-move' : 'cursor-pointer'
                     } group transition-all ${
                       isSelected
-                        ? 'ring-2 ring-sky-400 ring-offset-2 ring-offset-slate-900 rounded'
+                        ? 'ring-2 ring-sky-400 ring-offset-2 ring-offset-slate-900 rounded-lg'
                         : isArrangeMode
                         ? 'hover:ring-1 hover:ring-amber-400'
                         : ''
                     }`}
                   >
-                    {/* Render Real 3D Component Models Based on Type */}
-                    {comp.type.startsWith('ic_') ? (
-                      // 3D DIP IC Chip (NE555, LM358, ATmega328P)
+                    {/* Render Real Electronic 3D Products vs CAD Shapes */}
+                    {norm.includes('lm2596') || norm.includes('buck') || norm.includes('stepdown') ? (
+                      /* 3D Real LM2596 DC-DC Step-Down Buck Converter Module */
+                      <div
+                        style={{ width: 100, height: 64, transformStyle: 'preserve-3d' }}
+                        className="relative flex items-center justify-center rounded bg-gradient-to-br from-[#0284c7] to-[#0369a1] border border-sky-300/80 p-1 shadow-2xl"
+                      >
+                        {/* Real Product Photo Texture Overlay when enabled */}
+                        {showReal3DTextures && realPhotoUrl && (
+                          <img
+                            src={realPhotoUrl}
+                            alt="LM2596"
+                            className="absolute inset-0 w-full h-full object-cover rounded opacity-85 mix-blend-luminosity"
+                          />
+                        )}
+                        {/* 3D Toroidal Wire-Wound Inductor Coil */}
+                        <div
+                          style={{ transform: 'translateZ(14px)' }}
+                          className="absolute left-2.5 top-2 w-8 h-8 rounded-full bg-gradient-to-br from-amber-700 via-amber-600 to-amber-900 border border-amber-500 shadow-md flex items-center justify-center"
+                        >
+                          <div className="w-3.5 h-3.5 rounded-full bg-slate-900 border border-amber-800" />
+                          <div className="w-6 h-0.5 bg-amber-300 absolute rotate-45" />
+                          <div className="w-6 h-0.5 bg-amber-300 absolute -rotate-45" />
+                        </div>
+                        {/* 3D Blue Multiturn Trimmer Potentiometer */}
+                        <div
+                          style={{ transform: 'translateZ(12px)' }}
+                          className="absolute right-2.5 top-2 w-6 h-6 bg-blue-600 rounded-xs border border-blue-400 shadow-md flex items-center justify-center"
+                        >
+                          <div className="w-2 h-2 rounded-full bg-amber-400 border border-amber-600 flex items-center justify-center">
+                            <div className="w-1.5 h-0.5 bg-amber-800" />
+                          </div>
+                        </div>
+                        {/* 3D LM2596 IC with Metal Heat Sink Tab */}
+                        <div
+                          style={{ transform: 'translateZ(9px)' }}
+                          className="absolute bottom-2 left-6 w-8 h-6 bg-[#1a1a1c] border border-slate-600 rounded-xs flex flex-col items-center justify-center"
+                        >
+                          <div className="w-6 h-1.5 bg-gradient-to-r from-slate-300 to-slate-400 rounded-t-xs" />
+                          <span className="text-[5.5px] font-mono text-slate-200 font-bold">LM2596S</span>
+                        </div>
+                        {/* Power LED */}
+                        <div
+                          style={{ transform: 'translateZ(8px)' }}
+                          className={`absolute bottom-2.5 right-3 w-2 h-2 rounded-full ${
+                            showWorkingSimulation ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,1)] animate-pulse' : 'bg-red-900'
+                          }`}
+                        />
+                        {/* Terminal Labels */}
+                        <span className="absolute -top-3.5 left-1 text-[7px] font-mono font-bold text-sky-300">IN+</span>
+                        <span className="absolute -bottom-3.5 left-1 text-[7px] font-mono font-bold text-slate-400">IN-</span>
+                        <span className="absolute -top-3.5 right-1 text-[7px] font-mono font-bold text-emerald-300">OUT+</span>
+                        <span className="absolute -bottom-3.5 right-1 text-[7px] font-mono font-bold text-slate-400">OUT-</span>
+                      </div>
+                    ) : norm.includes('relay') || norm.includes('songle') || norm.includes('srd') ? (
+                      /* 3D Real Songle 5V Blue Relay Module */
+                      <div
+                        style={{ width: 80, height: 60, transformStyle: 'preserve-3d' }}
+                        className="relative flex items-center justify-center rounded bg-gradient-to-br from-[#1e293b] to-[#0f172a] border border-slate-700 p-1 shadow-2xl"
+                      >
+                        {/* Real Photo Texture Overlay */}
+                        {showReal3DTextures && realPhotoUrl && (
+                          <img
+                            src={realPhotoUrl}
+                            alt="Relay"
+                            className="absolute inset-0 w-full h-full object-cover rounded opacity-80 mix-blend-screen"
+                          />
+                        )}
+                        {/* Blue Songle Relay Plastic Cube */}
+                        <div
+                          style={{
+                            transform: 'translateZ(16px)',
+                            boxShadow: '0 12px 24px rgba(0,0,0,0.85)',
+                          }}
+                          className="w-11 h-9 rounded-xs bg-gradient-to-b from-[#0284c7] to-[#0369a1] border border-sky-400/80 flex flex-col items-center justify-center p-1 text-center"
+                        >
+                          <span className="text-[6.5px] font-mono font-black text-white leading-tight tracking-tight">
+                            SONGLE
+                          </span>
+                          <span className="text-[5.5px] font-mono text-sky-100 leading-tight">
+                            10A 250VAC
+                          </span>
+                          <span className="text-[5px] font-mono text-sky-200 leading-tight">
+                            SRD-05VDC
+                          </span>
+                        </div>
+                        {/* Green 3-Pin Screw Terminal Block */}
+                        <div
+                          style={{ transform: 'translateZ(10px)' }}
+                          className="absolute right-1 w-4 h-10 bg-emerald-700 border border-emerald-500 rounded-xs flex flex-col justify-around items-center py-0.5"
+                        >
+                          {[1, 2, 3].map((p) => (
+                            <div key={p} className="w-2.5 h-2.5 rounded-full bg-slate-900 border border-slate-600 flex items-center justify-center">
+                              <div className="w-1.5 h-0.5 bg-amber-400" />
+                            </div>
+                          ))}
+                        </div>
+                        {/* Active Relay Coil Indicator LED */}
+                        <div
+                          style={{ transform: 'translateZ(10px)' }}
+                          className={`absolute left-2 bottom-2 w-2 h-2 rounded-full ${
+                            showWorkingSimulation ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,1)] animate-ping' : 'bg-emerald-950'
+                          }`}
+                        />
+                      </div>
+                    ) : norm.includes('esp8266') || norm.includes('nodemcu') || norm.includes('esp32') ? (
+                      /* 3D Real NodeMCU / ESP8266 Wi-Fi Microcontroller */
+                      <div
+                        style={{ width: 100, height: 60, transformStyle: 'preserve-3d' }}
+                        className="relative flex items-center justify-center rounded bg-gradient-to-br from-[#18181b] to-[#09090b] border border-slate-700 p-1 shadow-2xl"
+                      >
+                        {/* Real Photo Texture Overlay */}
+                        {showReal3DTextures && realPhotoUrl && (
+                          <img
+                            src={realPhotoUrl}
+                            alt="NodeMCU"
+                            className="absolute inset-0 w-full h-full object-cover rounded opacity-85 mix-blend-lighten"
+                          />
+                        )}
+                        {/* Silver Metal RF Shielding Can */}
+                        <div
+                          style={{ transform: 'translateZ(8px)', boxShadow: '0 4px 10px rgba(0,0,0,0.8)' }}
+                          className="w-10 h-9 rounded-xs bg-gradient-to-br from-slate-200 via-slate-300 to-slate-400 border border-slate-100 flex flex-col items-center justify-center p-0.5"
+                        >
+                          <span className="text-[6px] font-mono font-black text-slate-800 tracking-tighter">ESP8266</span>
+                          <span className="text-[5px] font-mono text-slate-600">FCC ID AI</span>
+                        </div>
+                        {/* Gold Meander PCB Antenna */}
+                        <div
+                          style={{ transform: 'translateZ(3px)' }}
+                          className="absolute left-1.5 top-1.5 bottom-1.5 w-3 border-r-2 border-dashed border-amber-400"
+                        />
+                        {/* Silver Micro USB Port */}
+                        <div
+                          style={{ transform: 'translateZ(7px)' }}
+                          className="absolute right-1 w-3.5 h-6 bg-gradient-to-r from-slate-300 to-slate-400 rounded-xs border border-slate-500"
+                        />
+                        {/* Wi-Fi Blue Activity LED */}
+                        <div
+                          style={{ transform: 'translateZ(9px)' }}
+                          className={`absolute top-2 right-6 w-2 h-2 rounded-full ${
+                            showWorkingSimulation ? 'bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,1)] animate-pulse' : 'bg-cyan-950'
+                          }`}
+                        />
+                      </div>
+                    ) : norm.includes('water') || norm.includes('liquid') || norm.includes('probe') ? (
+                      /* 3D Real Water Immersion Probe Module */
+                      <div
+                        style={{ width: 70, height: 50, transformStyle: 'preserve-3d' }}
+                        className="relative flex items-center justify-center rounded bg-gradient-to-br from-[#0284c7] to-[#0369a1] border border-sky-400/80 p-1 shadow-2xl"
+                      >
+                        {/* Parallel Gold Immersion Sensing Tracks */}
+                        <div className="w-10 h-7 flex justify-between items-center px-1 bg-[#0284c7]/60 rounded border border-amber-400/40">
+                          {[1, 2, 3, 4, 5].map((t) => (
+                            <div key={t} className="w-1 h-full bg-gradient-to-b from-amber-300 to-amber-500 rounded-full" />
+                          ))}
+                        </div>
+                        {/* 3-pin connector header */}
+                        <div className="absolute right-1 flex flex-col justify-around h-6">
+                          {[1, 2, 3].map((p) => (
+                            <div key={p} className="w-2 h-1 bg-amber-400 rounded-xs shadow-xs" />
+                          ))}
+                        </div>
+                      </div>
+                    ) : norm.includes('buzzer') || norm.includes('beeper') || norm.includes('piezo') ? (
+                      /* 3D Real Piezo Buzzer */
+                      <div
+                        style={{ width: 44, height: 44, transformStyle: 'preserve-3d' }}
+                        className="relative flex items-center justify-center"
+                      >
+                        <div
+                          style={{ transform: 'translateZ(14px)', boxShadow: '0 8px 16px rgba(0,0,0,0.85)' }}
+                          className="w-10 h-10 rounded-full bg-gradient-to-b from-[#27272a] to-[#09090b] border-2 border-slate-600 flex items-center justify-center relative"
+                        >
+                          {/* Central sound hole */}
+                          <div className="w-3.5 h-3.5 rounded-full bg-black border border-slate-800" />
+                          {/* Polarity (+) mark */}
+                          <span className="absolute top-1 left-2 text-[7px] font-bold font-mono text-red-500">+</span>
+                          {/* Sound waves animation */}
+                          {showWorkingSimulation && (
+                            <div className="absolute -inset-1 rounded-full border border-sky-400/60 animate-ping pointer-events-none" />
+                          )}
+                        </div>
+                      </div>
+                    ) : norm.includes('terminal') || norm.includes('screw') ? (
+                      /* 3D Real Screw Terminal Block */
+                      <div
+                        style={{ width: 48, height: 36, transformStyle: 'preserve-3d' }}
+                        className="relative flex items-center justify-center"
+                      >
+                        <div
+                          style={{ transform: 'translateZ(12px)' }}
+                          className="w-11 h-8 rounded-xs bg-gradient-to-b from-[#15803d] to-[#166534] border border-emerald-400 flex items-center justify-around px-1 shadow-xl"
+                        >
+                          {[1, 2].map((p) => (
+                            <div key={p} className="w-3.5 h-3.5 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center">
+                              <div className="w-2 h-0.5 bg-amber-300" />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : comp.type.startsWith('ic_') || norm.includes('555') || norm.includes('358') ? (
+                      // 3D Real DIP IC Chip (NE555, LM358, ATmega328P)
                       <div
                         style={{
                           width: comp.type === 'ic_mcu' ? 120 : 66,
@@ -631,10 +899,10 @@ export const Pcb3DViewer: React.FC<Pcb3DViewerProps> = ({
                           {/* Pin 1 orientation notch & dot */}
                           <div className="absolute left-1.5 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-slate-900 border border-slate-600" />
                           <span className="text-[8px] font-mono font-bold text-slate-200 tracking-tight text-center truncate w-full">
-                            {comp.value || comp.designator}
+                            {realDetails.partNumber || comp.value || comp.designator}
                           </span>
                           <span className="text-[6px] font-mono text-slate-400 text-center uppercase">
-                            {comp.type === 'ic_ne555' ? 'TI USA' : 'MICRO'}
+                            {realDetails.manufacturer || 'TI USA'}
                           </span>
                         </div>
 
@@ -690,11 +958,13 @@ export const Pcb3DViewer: React.FC<Pcb3DViewerProps> = ({
                         <div
                           style={{
                             transform: 'translateZ(14px)',
-                            boxShadow: '0 0 16px rgba(239, 68, 68, 0.7), 0 8px 12px rgba(0, 0, 0, 0.6)',
+                            boxShadow: showWorkingSimulation
+                              ? '0 0 24px rgba(239, 68, 68, 1), 0 8px 16px rgba(0, 0, 0, 0.8)'
+                              : '0 0 12px rgba(239, 68, 68, 0.5), 0 6px 10px rgba(0, 0, 0, 0.6)',
                           }}
                           className="w-6 h-6 rounded-full bg-gradient-to-br from-red-400 via-red-600 to-red-800 border border-red-300/80 flex items-center justify-center"
                         >
-                          <div className="w-2 h-2 rounded-full bg-white/70 blur-2xs" />
+                          <div className="w-2 h-2 rounded-full bg-white/80 blur-2xs" />
                         </div>
                       </div>
                     ) : comp.type === 'ic_regulator' ? (
@@ -740,7 +1010,7 @@ export const Pcb3DViewer: React.FC<Pcb3DViewerProps> = ({
                           }}
                           className="w-7 h-3 rounded-full bg-[#fde047] border border-amber-600 flex items-center justify-around px-0.5"
                         >
-                          {/* 4 Color Bands (e.g. Brown, Black, Orange, Gold for 10k) */}
+                          {/* 4 Color Bands */}
                           <div className="w-0.5 h-full bg-[#78350f]" />
                           <div className="w-0.5 h-full bg-[#0f172a]" />
                           <div className="w-0.5 h-full bg-[#ea580c]" />
@@ -748,43 +1018,6 @@ export const Pcb3DViewer: React.FC<Pcb3DViewerProps> = ({
                         </div>
                         {/* Axial Wire Leads */}
                         <div className="w-full h-0.5 bg-slate-300 absolute -z-1" />
-                      </div>
-                    ) : comp.type.startsWith('sensor_') || comp.type.startsWith('ext_') || comp.category === 'sensors' ? (
-                      // 3D Sensor Breakout Module (e.g. BME280, MPU6050, DHT22)
-                      <div
-                        style={{
-                          width: 54,
-                          height: 36,
-                          transformStyle: 'preserve-3d',
-                        }}
-                        className="relative flex items-center justify-center"
-                      >
-                        {/* Blue FR4 Breakout Substrate */}
-                        <div
-                          style={{
-                            transform: 'translateZ(6px)',
-                            boxShadow: '0 6px 12px rgba(0, 0, 0, 0.75)',
-                          }}
-                          className="w-full h-full bg-gradient-to-br from-[#0284c7] to-[#0369a1] rounded-xs border border-sky-400/60 flex flex-col items-center justify-between p-1"
-                        >
-                          {/* Gold header pins along edge */}
-                          <div className="flex justify-between w-full px-1">
-                            {[1, 2, 3, 4].map((p) => (
-                              <div key={p} className="w-1.5 h-1.5 rounded-full bg-amber-400 border border-amber-600 shadow-xs" />
-                            ))}
-                          </div>
-                          {/* Metallic Sensor Element / Package */}
-                          <div
-                            style={{ transform: 'translateZ(8px)' }}
-                            className="w-4 h-4 rounded-xs bg-gradient-to-br from-slate-200 via-slate-400 to-slate-600 border border-white/80 shadow-md flex items-center justify-center"
-                          >
-                            <div className="w-1.5 h-1.5 rounded-full bg-slate-800/80" />
-                          </div>
-                          {/* Silkscreen Part Label */}
-                          <span className="text-[6px] font-mono font-bold text-white tracking-tighter truncate max-w-[48px]">
-                            {comp.value || comp.designator}
-                          </span>
-                        </div>
                       </div>
                     ) : (
                       // Default 3D SMD Chip Component (Resistor / Cap / Diode)
@@ -857,18 +1090,21 @@ export const Pcb3DViewer: React.FC<Pcb3DViewerProps> = ({
         {activeSelectedComp && (
           <div className="absolute bottom-4 right-4 max-w-sm bg-slate-900/95 backdrop-blur-md border border-sky-500/40 p-4 rounded-xl shadow-2xl text-xs z-30 animate-in fade-in slide-in-from-bottom-3 duration-200">
             <div className="flex items-start justify-between border-b border-slate-800 pb-2 mb-2.5">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-sky-400 font-mono text-sm">
-                    {activeSelectedComp.designator}
-                  </span>
-                  <span className="text-slate-300 font-medium">
-                    {activeSelectedComp.value}
-                  </span>
+              <div className="flex items-center gap-3">
+                <RealProductImage component={activeSelectedComp} className="w-12 h-12 rounded-lg border border-slate-700 bg-slate-950 p-1 flex-shrink-0 object-contain shadow-inner" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sky-400 font-mono text-sm">
+                      {activeSelectedComp.designator}
+                    </span>
+                    <span className="text-slate-300 font-medium">
+                      {activeSelectedComp.value}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Footprint: <span className="text-slate-200 font-mono">{activeSelectedComp.footprint}</span>
+                  </p>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Footprint: <span className="text-slate-200 font-mono">{activeSelectedComp.footprint}</span>
-                </p>
               </div>
               <button
                 onClick={() => setSelectedCompId(null)}
@@ -879,35 +1115,41 @@ export const Pcb3DViewer: React.FC<Pcb3DViewerProps> = ({
             </div>
 
             {/* Real Project Manufacturer Part Information */}
-            <div className="space-y-1.5 text-[11px]">
-              <div className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider">
-                Real Project Component Specs
-              </div>
-              <div className="flex justify-between py-0.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Manufacturer:</span>
-                <span className="text-slate-200 font-medium">
-                  {activeSelectedComp.realPart?.manufacturer || 'Standard Electronic Part'}
-                </span>
-              </div>
-              <div className="flex justify-between py-0.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Part Number (MPN):</span>
-                <span className="text-amber-300 font-mono font-semibold">
-                  {activeSelectedComp.realPart?.manufacturerPartNumber || activeSelectedComp.value}
-                </span>
-              </div>
-              <div className="flex justify-between py-0.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Supplier &amp; SKU:</span>
-                <span className="text-sky-300 font-mono">
-                  {activeSelectedComp.realPart ? `${activeSelectedComp.realPart.supplier} (${activeSelectedComp.realPart.supplierPartNumber})` : 'LCSC / DigiKey'}
-                </span>
-              </div>
-              <div className="flex justify-between py-0.5">
-                <span className="text-slate-400">Estimated Unit Cost:</span>
-                <span className="text-emerald-400 font-semibold font-mono">
-                  {activeSelectedComp.realPart?.unitPrice || '$0.05'}
-                </span>
-              </div>
-            </div>
+            {(() => {
+              const details = getRealProductDetails(activeSelectedComp);
+              return (
+                <div className="space-y-1.5 text-[11px]">
+                  <div className="flex items-center justify-between text-[10px] uppercase font-bold text-emerald-400 tracking-wider">
+                    <span>Authentic Product Specs</span>
+                    <span className="text-slate-400 font-mono text-[9px]">{details.package}</span>
+                  </div>
+                  <div className="flex justify-between py-0.5 border-b border-slate-800/60">
+                    <span className="text-slate-400">Manufacturer:</span>
+                    <span className="text-slate-200 font-medium">
+                      {details.manufacturer}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-0.5 border-b border-slate-800/60">
+                    <span className="text-slate-400">Part Number (MPN):</span>
+                    <span className="text-amber-300 font-mono font-semibold">
+                      {details.partNumber}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-0.5 border-b border-slate-800/60">
+                    <span className="text-slate-400">Supplier &amp; SKU:</span>
+                    <span className="text-sky-300 font-mono">
+                      {details.supplier} ({details.supplierPartNumber})
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-0.5">
+                    <span className="text-slate-400">Estimated Unit Cost:</span>
+                    <span className="text-emerald-400 font-semibold font-mono">
+                      {details.unitPrice}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Action Buttons */}
             <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center gap-2">

@@ -1,1 +1,46 @@
 @import "tailwindcss";
+
+@keyframes currentFlow {
+  from {
+    stroke-dashoffset: 32;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes currentFlowReverse {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: 32;
+  }
+}
+
+@keyframes signalPulse {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+.animate-current-flow {
+  animation: currentFlow 1s linear infinite;
+}
+
+.animate-current-flow-fast {
+  animation: currentFlow 0.5s linear infinite;
+}
+
+.animate-current-flow-reverse {
+  animation: currentFlowReverse 1s linear infinite;
+}
+
+.animate-signal-pulse {
+  animation: signalPulse 1.4s ease-in-out infinite;
+}

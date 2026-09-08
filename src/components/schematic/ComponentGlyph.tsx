@@ -9,6 +9,7 @@ interface ComponentGlyphProps {
   hoveredPinId?: string | null;
   simulationResult?: ComponentSimResult;
   isSimulating?: boolean;
+  isLiveWorking?: boolean;
   onToggleSwitch?: (component: SchematicComponent) => void;
   probedPinId?: string | null;
   onPinClick?: (pinId: string, event?: React.MouseEvent) => void;
@@ -21,6 +22,7 @@ export const ComponentGlyph: React.FC<ComponentGlyphProps> = ({
   hoveredPinId,
   simulationResult,
   isSimulating = false,
+  isLiveWorking = false,
   onToggleSwitch,
   probedPinId,
   onPinClick,
@@ -60,7 +62,8 @@ export const ComponentGlyph: React.FC<ComponentGlyphProps> = ({
 
   const isLedLit =
     isLed &&
-    Boolean(simulationResult && simulationResult.current > 0.0005 && !isLedBurnedOut);
+    !isLedBurnedOut &&
+    (isLiveWorking || Boolean(simulationResult && simulationResult.current > 0.0005));
 
   // Check switch state
   const isSwitchClosed = component.testSettings?.isClosed ?? true;

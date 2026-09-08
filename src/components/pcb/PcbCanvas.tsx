@@ -16,12 +16,20 @@ import {
   CheckCircle,
   RefreshCw,
   Sliders,
+  Eye,
+  Activity,
+  Info,
 } from 'lucide-react';
 import {
   computePcbCoordinatesFromSchematic,
   syncAllFromSchematic,
   autoArrangeBestFit,
 } from '../../utils/pcbPlacement';
+import {
+  RealPcbFootprintComponent,
+  RealProductImage,
+  getRealProductDetails,
+} from '../../utils/componentImages';
 
 interface PcbCanvasProps {
   components: SchematicComponent[];
@@ -38,6 +46,7 @@ interface FootprintLayout {
   value: string;
   type: string;
   footprint: string;
+  category?: string;
   x: number;
   y: number;
   rotation: number;
@@ -63,7 +72,88 @@ function buildFootprint(
   let width = 60;
   let height = 40;
 
-  if (
+  const norm = (c.type + ' ' + (c.value || '') + ' ' + (c.footprint || '')).toLowerCase();
+
+  // 1. LM2596 / DC-DC Buck Converter Module
+  if (norm.includes('lm2596') || norm.includes('buck') || norm.includes('stepdown') || norm.includes('dcdc')) {
+    width = 110;
+    height = 70;
+    pads = [
+      { id: 'in_pos', number: 'IN+', x: -44, y: -24, type: 'tht', net: c.pins?.find((p) => p.name?.includes('+') || p.id === '1')?.net },
+      { id: 'in_neg', number: 'IN-', x: -44, y: 24, type: 'tht', net: c.pins?.find((p) => p.name?.includes('-') || p.id === '2')?.net },
+      { id: 'out_pos', number: 'OUT+', x: 44, y: -24, type: 'tht', net: c.pins?.find((p) => p.name?.includes('OUT') || p.id === '3')?.net },
+      { id: 'out_neg', number: 'OUT-', x: 44, y: 24, type: 'tht', net: c.pins?.find((p) => p.name?.includes('GND') || p.id === '4')?.net },
+    ];
+  } else if (norm.includes('relay') || norm.includes('songle') || norm.includes('srd')) {
+    // 2. 5V Songle Relay Module
+    width = 85;
+    height = 65;
+    pads = [
+      { id: 'vcc', number: 'VCC', x: -32, y: -20, type: 'tht', net: c.pins?.find((p) => p.name?.includes('VCC'))?.net },
+      { id: 'gnd', number: 'GND', x: -32, y: 0, type: 'tht', net: c.pins?.find((p) => p.name?.includes('GND'))?.net },
+      { id: 'in', number: 'IN', x: -32, y: 20, type: 'tht', net: c.pins?.find((p) => p.name?.includes('IN'))?.net },
+      { id: 'no', number: 'NO', x: 32, y: -20, type: 'tht', net: c.pins?.find((p) => p.name?.includes('NO'))?.net },
+      { id: 'com', number: 'COM', x: 32, y: 0, type: 'tht', net: c.pins?.find((p) => p.name?.includes('COM'))?.net },
+      { id: 'nc', number: 'NC', x: 32, y: 20, type: 'tht', net: c.pins?.find((p) => p.name?.includes('NC'))?.net },
+    ];
+  } else if (norm.includes('esp8266') || norm.includes('nodemcu') || norm.includes('esp32')) {
+    // 3. NodeMCU / ESP8266 Wi-Fi Dev Board
+    width = 110;
+    height = 65;
+    for (let p = 1; p <= 8; p++) {
+      pads.push({
+        id: `L_${p}`,
+        number: String(p),
+        x: -45 + (p - 1) * 12.8,
+        y: -24,
+        type: 'tht',
+        net: c.pins?.[p - 1]?.net,
+      });
+      pads.push({
+        id: `R_${p}`,
+        number: String(p + 8),
+        x: -45 + (p - 1) * 12.8,
+        y: 24,
+        type: 'tht',
+        net: c.pins?.[p + 7]?.net,
+      });
+    }
+  } else if (norm.includes('water') || norm.includes('liquid') || norm.includes('probe')) {
+    // 4. Water Level Immersion Sensor
+    width = 75;
+    height = 55;
+    pads = [
+      { id: 'sig', number: 'S', x: -22, y: -18, type: 'tht', net: c.pins?.[0]?.net },
+      { id: 'vcc', number: '+', x: 0, y: -18, type: 'tht', net: c.pins?.[1]?.net },
+      { id: 'gnd', number: '-', x: 22, y: -18, type: 'tht', net: c.pins?.[2]?.net },
+    ];
+  } else if (norm.includes('buzzer') || norm.includes('beeper') || norm.includes('piezo')) {
+    // 5. Piezo Buzzer
+    width = 54;
+    height = 54;
+    pads = [
+      { id: 'pos', number: '+', x: -14, y: 0, type: 'tht', net: c.pins?.[0]?.net },
+      { id: 'neg', number: '-', x: 14, y: 0, type: 'tht', net: c.pins?.[1]?.net },
+    ];
+  } else if (norm.includes('terminal') || norm.includes('screw') || norm.includes('kf301')) {
+    // 6. Screw Terminal Block
+    width = 58;
+    height = 42;
+    pads = [
+      { id: '1', number: '1', x: -14, y: 0, type: 'tht', net: c.pins?.[0]?.net },
+      { id: '2', number: '2', x: 14, y: 0, type: 'tht', net: c.pins?.[1]?.net },
+    ];
+  } else if (norm.includes('button') || norm.includes('switch') || norm.includes('tact')) {
+    // 7. Tactile Pushbutton Switch
+    width = 48;
+    height = 48;
+    pads = [
+      { id: '1', number: '1', x: -16, y: -14, type: 'tht', net: c.pins?.[0]?.net },
+      { id: '2', number: '2', x: -16, y: 14, type: 'tht', net: c.pins?.[1]?.net },
+      { id: '3', number: '3', x: 16, y: -14, type: 'tht', net: c.pins?.[2]?.net },
+      { id: '4', number: '4', x: 16, y: 14, type: 'tht', net: c.pins?.[3]?.net },
+    ];
+  } else if (
     c.type.startsWith('sensor_') ||
     c.type.startsWith('ext_') ||
     c.category === 'sensors' ||
@@ -87,7 +177,7 @@ function buildFootprint(
         net: c.pins[p]?.net,
       });
     }
-  } else if (c.type === 'ic_ne555' || c.footprint?.includes('DIP-8')) {
+  } else if (c.type === 'ic_ne555' || c.footprint?.includes('DIP-8') || norm.includes('555') || norm.includes('358')) {
     width = 80;
     height = 60;
     for (let p = 1; p <= 4; p++) {
@@ -97,7 +187,7 @@ function buildFootprint(
         x: -30 + (p - 1) * 20,
         y: 20,
         type: 'tht',
-        net: c.pins.find((pin) => pin.id === String(p))?.net,
+        net: c.pins?.find((pin) => pin.id === String(p))?.net,
       });
     }
     for (let p = 5; p <= 8; p++) {
@@ -107,24 +197,24 @@ function buildFootprint(
         x: 30 - (p - 5) * 20,
         y: -20,
         type: 'tht',
-        net: c.pins.find((pin) => pin.id === String(p))?.net,
+        net: c.pins?.find((pin) => pin.id === String(p))?.net,
       });
     }
-  } else if (c.type === 'ic_regulator' || c.footprint?.includes('TO-220')) {
+  } else if (c.type === 'ic_regulator' || c.footprint?.includes('TO-220') || norm.includes('7805')) {
     width = 70;
     height = 40;
     pads = [
-      { id: '1', number: '1', x: -20, y: 0, type: 'tht', net: c.pins[0]?.net },
-      { id: '2', number: '2', x: 0, y: 0, type: 'tht', net: c.pins[1]?.net },
-      { id: '3', number: '3', x: 20, y: 0, type: 'tht', net: c.pins[2]?.net },
+      { id: '1', number: '1', x: -20, y: 0, type: 'tht', net: c.pins?.[0]?.net },
+      { id: '2', number: '2', x: 0, y: 0, type: 'tht', net: c.pins?.[1]?.net },
+      { id: '3', number: '3', x: 20, y: 0, type: 'tht', net: c.pins?.[2]?.net },
     ];
-  } else if (c.type === 'npn_bjt' || c.type === 'pnp_bjt' || c.footprint?.includes('TO-92')) {
+  } else if (c.type === 'npn_bjt' || c.type === 'pnp_bjt' || c.footprint?.includes('TO-92') || norm.includes('2n2222')) {
     width = 50;
     height = 40;
     pads = [
-      { id: '1', number: '1', x: -14, y: 8, type: 'tht', net: c.pins[0]?.net },
-      { id: '2', number: '2', x: 0, y: -8, type: 'tht', net: c.pins[1]?.net },
-      { id: '3', number: '3', x: 14, y: 8, type: 'tht', net: c.pins[2]?.net },
+      { id: '1', number: '1', x: -14, y: 8, type: 'tht', net: c.pins?.[0]?.net },
+      { id: '2', number: '2', x: 0, y: -8, type: 'tht', net: c.pins?.[1]?.net },
+      { id: '3', number: '3', x: 14, y: 8, type: 'tht', net: c.pins?.[2]?.net },
     ];
   } else if (c.type === 'ic_mcu' || c.footprint?.includes('DIP-28')) {
     width = 130;
@@ -136,7 +226,7 @@ function buildFootprint(
         x: -55 + (p - 1) * 8.5,
         y: 28,
         type: 'tht',
-        net: c.pins.find((pin) => pin.id === String(p))?.net,
+        net: c.pins?.find((pin) => pin.id === String(p))?.net,
       });
     }
     for (let p = 15; p <= 28; p++) {
@@ -146,7 +236,7 @@ function buildFootprint(
         x: 55 - (p - 15) * 8.5,
         y: -28,
         type: 'tht',
-        net: c.pins.find((pin) => pin.id === String(p))?.net,
+        net: c.pins?.find((pin) => pin.id === String(p))?.net,
       });
     }
   } else {
@@ -154,8 +244,8 @@ function buildFootprint(
     width = 50;
     height = 30;
     pads = [
-      { id: '1', number: '1', x: -16, y: 0, type: 'smd', net: c.pins[0]?.net },
-      { id: '2', number: '2', x: 16, y: 0, type: 'smd', net: c.pins[1]?.net },
+      { id: '1', number: '1', x: -16, y: 0, type: 'smd', net: c.pins?.[0]?.net },
+      { id: '2', number: '2', x: 16, y: 0, type: 'smd', net: c.pins?.[1]?.net },
     ];
   }
 
@@ -166,6 +256,7 @@ function buildFootprint(
     value: c.value,
     type: c.type,
     footprint: c.footprint,
+    category: c.category,
     x,
     y,
     rotation,
@@ -186,6 +277,11 @@ export const PcbCanvas: React.FC<PcbCanvasProps> = ({
   const [boardHeight, setBoardHeight] = useState(420);
   const [activeLayer, setActiveLayer] = useState<'both' | 'top' | 'bottom'>('both');
   const [selectedFootprintId, setSelectedFootprintId] = useState<string | null>(null);
+
+  // Real Electronics Products & Live Animation Controls
+  const [showRealComponents, setShowRealComponents] = useState(true);
+  const [showCurrentAnimation, setShowCurrentAnimation] = useState(true);
+  const [hoveredFp, setHoveredFp] = useState<FootprintLayout | null>(null);
 
   // 2D PCB Board Full-Circuit Rotation in all directions & Flip check
   const [boardRotation, setBoardRotation] = useState<0 | 90 | 180 | 270>(0);
@@ -437,6 +533,34 @@ export const PcbCanvas: React.FC<PcbCanvasProps> = ({
               <span className="w-2 h-2 rounded-full bg-blue-500" /> Bottom Copper
             </button>
           </div>
+
+          {/* Real Electronics Products & Live Current Animation Toggles */}
+          <div className="flex items-center space-x-1 bg-slate-900/90 p-0.5 rounded-lg border border-slate-700/80 text-xs">
+            <button
+              onClick={() => setShowRealComponents(!showRealComponents)}
+              className={`px-2.5 py-1 rounded font-medium flex items-center gap-1.5 cursor-pointer transition-colors ${
+                showRealComponents
+                  ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-500/50 shadow-xs'
+                  : 'text-slate-400 hover:bg-slate-800'
+              }`}
+              title="Toggle between Real Physical Electronic Product Views and CAD Silkscreen Outlines"
+            >
+              <Eye className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{showRealComponents ? 'Real Products' : 'Silkscreen'}</span>
+            </button>
+            <button
+              onClick={() => setShowCurrentAnimation(!showCurrentAnimation)}
+              className={`px-2.5 py-1 rounded font-medium flex items-center gap-1.5 cursor-pointer transition-colors ${
+                showCurrentAnimation
+                  ? 'bg-amber-950/90 text-amber-300 border border-amber-500/50 shadow-xs'
+                  : 'text-slate-400 hover:bg-slate-800'
+              }`}
+              title="Toggle Live Animated Current Flow Along Copper Traces"
+            >
+              <Activity className={`w-3.5 h-3.5 ${showCurrentAnimation ? 'text-amber-400 animate-pulse' : 'text-slate-500'}`} />
+              <span>{showCurrentAnimation ? 'Current Flow: Active' : 'Current: Off'}</span>
+            </button>
+          </div>
         </div>
 
         {/* Action Controls: Drag, Rotate & Best-Fit Auto-Arrange */}
@@ -642,6 +766,24 @@ export const PcbCanvas: React.FC<PcbCanvasProps> = ({
                   opacity="0.8"
                 />
               ))}
+
+            {/* Live Animated Current Flow Along Copper Traces (Real Working PCB View) */}
+            {showCurrentAnimation && (
+              <g className="pointer-events-none">
+                {ratsnestLines.map((line, idx) => (
+                  <path
+                    key={`curr-${idx}`}
+                    d={`M ${line.x1} ${line.y1} L ${line.x2} ${line.y1} L ${line.x2} ${line.y2}`}
+                    fill="none"
+                    stroke="#fef08a"
+                    strokeWidth="2.2"
+                    strokeDasharray="4 7"
+                    className="animate-current-flow"
+                    opacity="0.9"
+                  />
+                ))}
+              </g>
+            )}
           </svg>
 
           {/* Interactive Component Footprints (Drag-and-Drop) */}
@@ -653,6 +795,8 @@ export const PcbCanvas: React.FC<PcbCanvasProps> = ({
               <div
                 key={fp.id}
                 onMouseDown={(e) => handleMouseDownFootprint(e, fp)}
+                onMouseEnter={() => setHoveredFp(fp)}
+                onMouseLeave={() => setHoveredFp((cur) => (cur?.id === fp.id ? null : cur))}
                 style={{
                   left: fp.x,
                   top: fp.y,
@@ -669,46 +813,104 @@ export const PcbCanvas: React.FC<PcbCanvasProps> = ({
                     : 'hover:ring-1 hover:ring-slate-300'
                 }`}
               >
-                {/* Footprint Silkscreen Box */}
-                <div className="relative w-full h-full border-2 border-white/90 bg-slate-900/70 rounded-xs flex items-center justify-center p-1">
-                  {/* Pin 1 Notch indicator */}
-                  <div className="absolute top-0 left-0 w-2.5 h-2.5 border-t-2 border-l-2 border-amber-400" />
+                {showRealComponents ? (
+                  /* Real Electronic Product View (Authentic Components, Modules & Chips) */
+                  <RealPcbFootprintComponent
+                    comp={fp}
+                    width={fp.width}
+                    height={fp.height}
+                    pads={fp.pads}
+                    isSelected={isSelected}
+                  />
+                ) : (
+                  /* Standard Footprint Silkscreen Box */
+                  <div className="relative w-full h-full border-2 border-white/90 bg-slate-900/70 rounded-xs flex items-center justify-center p-1">
+                    {/* Pin 1 Notch indicator */}
+                    <div className="absolute top-0 left-0 w-2.5 h-2.5 border-t-2 border-l-2 border-amber-400" />
 
-                  {/* Silkscreen text */}
-                  <div className="text-center pointer-events-none">
-                    <div className="text-[9px] font-mono font-bold text-white tracking-tighter truncate max-w-[75px]">
-                      {fp.designator}
+                    {/* Silkscreen text */}
+                    <div className="text-center pointer-events-none">
+                      <div className="text-[9px] font-mono font-bold text-white tracking-tighter truncate max-w-[75px]">
+                        {fp.designator}
+                      </div>
+                      <div className="text-[7px] font-mono text-slate-300 truncate max-w-[75px]">
+                        {fp.value}
+                      </div>
                     </div>
-                    <div className="text-[7px] font-mono text-slate-300 truncate max-w-[75px]">
-                      {fp.value}
-                    </div>
+
+                    {/* Copper Pads */}
+                    {fp.pads.map((pad) => (
+                      <div
+                        key={pad.id}
+                        style={{
+                          left: `calc(50% + ${pad.x}px)`,
+                          top: `calc(50% + ${pad.y}px)`,
+                          transform: 'translate(-50%, -50%)',
+                        }}
+                        className={`absolute w-3.5 h-3.5 rounded-full flex items-center justify-center border ${
+                          pad.net?.startsWith('GND')
+                            ? 'bg-blue-600 border-blue-300'
+                            : pad.net?.startsWith('VCC') || pad.net?.includes('5V')
+                            ? 'bg-red-600 border-red-300'
+                            : 'bg-amber-500 border-amber-300'
+                        }`}
+                      >
+                        <span className="text-[6px] font-mono font-bold text-black">{pad.number}</span>
+                      </div>
+                    ))}
                   </div>
-
-                  {/* Copper Pads */}
-                  {fp.pads.map((pad) => (
-                    <div
-                      key={pad.id}
-                      style={{
-                        left: `calc(50% + ${pad.x}px)`,
-                        top: `calc(50% + ${pad.y}px)`,
-                        transform: 'translate(-50%, -50%)',
-                      }}
-                      className={`absolute w-3.5 h-3.5 rounded-full flex items-center justify-center border ${
-                        pad.net?.startsWith('GND')
-                          ? 'bg-blue-600 border-blue-300'
-                          : pad.net?.startsWith('VCC') || pad.net?.includes('5V')
-                          ? 'bg-red-600 border-red-300'
-                          : 'bg-amber-500 border-amber-300'
-                      }`}
-                    >
-                      <span className="text-[6px] font-mono font-bold text-black">{pad.number}</span>
-                    </div>
-                  ))}
-                </div>
+                )}
               </div>
             );
           })}
         </div>
+
+        {/* Floating Real Product Inspection HUD Card */}
+        {(hoveredFp || selectedFp) && (() => {
+          const target = hoveredFp || selectedFp;
+          if (!target) return null;
+          const details = getRealProductDetails(target);
+
+          return (
+            <div className="absolute bottom-4 right-4 w-76 bg-slate-900/95 border border-slate-700/80 rounded-xl p-3 shadow-2xl backdrop-blur-md z-30 pointer-events-none animate-in fade-in slide-in-from-bottom-2">
+              <div className="flex items-center gap-3 border-b border-slate-800 pb-2.5 mb-2.5">
+                <RealProductImage
+                  comp={target}
+                  className="w-14 h-14 rounded-lg bg-slate-950 p-1 border border-slate-700/60 object-contain shadow-inner"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono font-bold text-sky-400 text-sm">{target.designator}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+                      {target.value || target.type}
+                    </span>
+                  </div>
+                  <div className="text-[11px] font-medium text-slate-200 truncate mt-0.5">{details.name}</div>
+                  <div className="text-[9.5px] text-slate-400 font-mono truncate">{details.manufacturer} · {details.partNumber}</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1.5 text-[10.5px] font-mono">
+                <div className="bg-slate-950/60 p-1.5 rounded border border-slate-800/80">
+                  <span className="text-[9px] text-slate-500 uppercase block">Package</span>
+                  <span className="text-slate-300 truncate block">{details.package}</span>
+                </div>
+                <div className="bg-slate-950/60 p-1.5 rounded border border-slate-800/80">
+                  <span className="text-[9px] text-slate-500 uppercase block">Rating</span>
+                  <span className="text-amber-300 truncate block">{details.voltageRating}</span>
+                </div>
+              </div>
+
+              <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1.5 border-t border-slate-800/60">
+                <span>Pads: {target.pads.length}</span>
+                <span>Pos: ({Math.round(target.x)}, {Math.round(target.y)})</span>
+                <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" /> Real Product Active
+                </span>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

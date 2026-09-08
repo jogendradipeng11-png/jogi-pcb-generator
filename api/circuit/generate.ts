@@ -111,11 +111,8 @@ Return valid JSON adhering to the specified schema.`;
 
     if (
       p.includes("0b44da0e") ||
-      p.includes("easyeda") ||
       p.includes("lm2596") ||
-      p.includes("buck") ||
-      p.includes("step-down") ||
-      p.includes("converter")
+      (p.includes("buck") && (p.includes("step-down") || p.includes("regulator") || p.includes("3a")))
     ) {
       title = "LM2596 Step-Down Buck Converter (EasyEDA Component 0b44da0e)";
       category = "Power Supply & Regulators";

@@ -78,11 +78,11 @@ function cleanAndParseJSON(text: string): any {
 }
 
 // Candidate models for graceful fallback cascade.
-// Prioritizes gemini-3.1-flash-lite to ensure rapid response times and high availability
-// during peak demand spikes, with gemini-3.8-flash and gemini-flash-latest as robust alternatives.
+// Prioritizes gemini-3.8-flash and gemini-3.1-flash-lite to ensure rapid response times and high availability,
+// followed by gemini-flash-latest. (Paid models such as gemini-3.1-pro-preview are excluded to prevent quota exhaustion).
 const CANDIDATE_MODELS = [
-  "gemini-3.1-flash-lite",
   "gemini-3.8-flash",
+  "gemini-3.1-flash-lite",
   "gemini-flash-latest",
 ];
 
@@ -94,6 +94,10 @@ function isHighDemandOrTransient(err: any): boolean {
     status === 503 ||
     status === 429 ||
     status === 500 ||
+    msg.includes("quota") ||
+    msg.includes("rate limit") ||
+    msg.includes("rate-limits") ||
+    msg.includes("rate_limit") ||
     msg.includes("high demand") ||
     msg.includes("spikes in demand") ||
     msg.includes("unavailable") ||
@@ -183,12 +187,8 @@ function generateFallbackCircuit(prompt?: string, reason?: string, hasImage?: bo
   // 0. EasyEDA / LM2596 Step-Down Buck Converter (EasyEDA Component 0b44da0e66aa4101b02e0973e40419f8)
   if (
     p.includes("0b44da0e") ||
-    p.includes("easyeda") ||
     p.includes("lm2596") ||
-    p.includes("buck") ||
-    p.includes("step-down") ||
-    p.includes("converter") ||
-    p.includes("voltage regulator module")
+    (p.includes("buck") && (p.includes("step-down") || p.includes("3a") || p.includes("switching") || p.includes("lm2596")))
   ) {
     return {
       title: "LM2596 Step-Down Buck Converter (EasyEDA Component 0b44da0e)",
@@ -364,12 +364,8 @@ function generateFallbackCircuit(prompt?: string, reason?: string, hasImage?: bo
     p.includes("4-channel relay") ||
     p.includes("four channel relay") ||
     p.includes("relay 4") ||
-    p.includes("18650") ||
-    p.includes("ir receiver") ||
-    p.includes("vs1838") ||
-    p.includes("tsop") ||
-    (hasImage && !p.includes("555") && !p.includes("opamp") && !p.includes("buck") && !p.includes("audio")) ||
-    ((p.includes("relay") || p.includes("nodemcu") || p.includes("esp8266")) && (p.includes("dht11") || p.includes("sensor") || p.includes("battery") || p.includes("button")) && !p.includes("v4.2") && !p.includes("techstudycell"))
+    ((p.includes("nodemcu") || p.includes("esp8266")) && (p.includes("relay") || p.includes("home automation") || p.includes("iot")) && !p.includes("v4.2") && !p.includes("techstudycell")) ||
+    ((p.includes("relay") || p.includes("nodemcu") || p.includes("esp8266")) && (p.includes("dht11") || p.includes("18650") || p.includes("ir receiver") || p.includes("vs1838")) && !p.includes("v4.2") && !p.includes("techstudycell"))
   ) {
     return {
       title: "ESP8266 NodeMCU 4-Channel Relay Home Automation (Cirkit Designer)",
@@ -552,6 +548,281 @@ function generateFallbackCircuit(prompt?: string, reason?: string, hasImage?: bo
         { name: "AC_LOAD2", color: "#0891b2" },
         { name: "AC_LOAD3", color: "#7c3aed" },
         { name: "AC_LOAD4", color: "#c026d3" },
+      ],
+    };
+  }
+
+  // 0b. Water Level Indicator with Buzzer (Circuits-DIY classic: BC547 transistor probes)
+  if (
+    p.includes("water") ||
+    p.includes("liquid") ||
+    p.includes("tank") ||
+    p.includes("level indicator") ||
+    p.includes("water-level")
+  ) {
+    return {
+      title: "Water Level Indicator with Alarm (Circuits-DIY)",
+      category: "Sensors & Detectors",
+      summary: "Multi-level automatic water tank depth indicator circuit utilizing BC547 NPN transistors as water conductivity switches, with color-coded status LEDs and an acoustic overflow buzzer.",
+      explanation: "Water conductivity completes the circuit between the common positive supply probe (COM at tank bottom) and the submerged level probes. When water touches a probe, base current flows into the corresponding BC547 transistor (Q1 for Low, Q2 for Medium, Q3 for High), switching it into saturation. This pulls the cathode of the status LED to ground, turning it ON. When the tank reaches full capacity, transistor Q3 additionally activates buzzer BZ1 to alert the user of overflow.",
+      formula: "V_be = V_in * (R_be / (R_water + R_base)) >= 0.7V triggers transistor saturation.",
+      specifications: [
+        "Supply Voltage: 9V DC Battery or Power Supply",
+        "Indicators: Low (Green LED), Medium (Yellow LED), Full (Red LED + Audio Buzzer)",
+        "Transistors: 3x BC547 / 2N2222 NPN Silicon BJT",
+        "Sensing Probes: 4x Stainless Steel or tinned copper probes (COM, LOW, MID, HIGH)",
+        "Standby Current: Zero (<1µA) when probes are dry",
+      ],
+      tips: [
+        "Place the common probe wire (COM) at the very bottom of the tank connected directly to +9V.",
+        "Add 1kΩ resistors at the base of each transistor to protect the B-E junction against accidental shorts.",
+        "Use stainless steel probes to minimize electrolytic corrosion over prolonged immersion.",
+      ],
+      synthesizedFallback: true,
+      fallbackReason: reason || "Synthesized via local EDA engine.",
+      components: [
+        {
+          id: "pwr_vcc",
+          type: "vcc",
+          designator: "VCC1",
+          value: "+9V",
+          footprint: "POWER_PORT",
+          x: 120,
+          y: 80,
+          rotation: 0,
+          pins: [{ id: "1", name: "VCC", net: "VCC" }],
+        },
+        {
+          id: "pwr_gnd",
+          type: "gnd",
+          designator: "GND1",
+          value: "GND",
+          footprint: "POWER_PORT",
+          x: 120,
+          y: 520,
+          rotation: 0,
+          pins: [{ id: "1", name: "GND", net: "GND" }],
+        },
+        {
+          id: "j_probes",
+          type: "connector_4pin",
+          designator: "J_PROBES",
+          value: "Water Probes (COM/LOW/MID/HIGH)",
+          footprint: "HDR-1X4",
+          x: 200,
+          y: 260,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "COM_+V", net: "VCC" },
+            { id: "2", name: "PROBE_LOW", net: "NET_P_LOW" },
+            { id: "3", name: "PROBE_MID", net: "NET_P_MID" },
+            { id: "4", name: "PROBE_HIGH", net: "NET_P_HIGH" },
+          ],
+        },
+        // Low Level Stage
+        {
+          id: "r_base1",
+          type: "resistor",
+          designator: "R1",
+          value: "1kΩ",
+          footprint: "R0805",
+          x: 320,
+          y: 160,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "NET_P_LOW" },
+            { id: "2", name: "2", net: "NET_B_Q1" },
+          ],
+        },
+        {
+          id: "q_low",
+          type: "npn_bjt",
+          designator: "Q1",
+          value: "BC547",
+          footprint: "TO-92",
+          x: 440,
+          y: 180,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "B", net: "NET_B_Q1" },
+            { id: "2", name: "C", net: "NET_LED_LOW" },
+            { id: "3", name: "E", net: "GND" },
+          ],
+        },
+        {
+          id: "r_led1",
+          type: "resistor",
+          designator: "R4",
+          value: "330Ω",
+          footprint: "R0805",
+          x: 440,
+          y: 80,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "VCC" },
+            { id: "2", name: "2", net: "NET_A_LED1" },
+          ],
+        },
+        {
+          id: "led_low",
+          type: "led_green",
+          designator: "LED1",
+          value: "Green (Low Level)",
+          footprint: "LED-5MM-GRN",
+          x: 560,
+          y: 140,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "A", net: "NET_A_LED1" },
+            { id: "2", name: "K", net: "NET_LED_LOW" },
+          ],
+        },
+        // Medium Level Stage
+        {
+          id: "r_base2",
+          type: "resistor",
+          designator: "R2",
+          value: "1kΩ",
+          footprint: "R0805",
+          x: 320,
+          y: 280,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "NET_P_MID" },
+            { id: "2", name: "2", net: "NET_B_Q2" },
+          ],
+        },
+        {
+          id: "q_mid",
+          type: "npn_bjt",
+          designator: "Q2",
+          value: "BC547",
+          footprint: "TO-92",
+          x: 440,
+          y: 300,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "B", net: "NET_B_Q2" },
+            { id: "2", name: "C", net: "NET_LED_MID" },
+            { id: "3", name: "E", net: "GND" },
+          ],
+        },
+        {
+          id: "r_led2",
+          type: "resistor",
+          designator: "R5",
+          value: "330Ω",
+          footprint: "R0805",
+          x: 440,
+          y: 220,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "VCC" },
+            { id: "2", name: "2", net: "NET_A_LED2" },
+          ],
+        },
+        {
+          id: "led_mid",
+          type: "led_yellow",
+          designator: "LED2",
+          value: "Yellow (Mid Level)",
+          footprint: "LED-5MM-YEL",
+          x: 560,
+          y: 260,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "A", net: "NET_A_LED2" },
+            { id: "2", name: "K", net: "NET_LED_MID" },
+          ],
+        },
+        // High Level Stage with Buzzer
+        {
+          id: "r_base3",
+          type: "resistor",
+          designator: "R3",
+          value: "1kΩ",
+          footprint: "R0805",
+          x: 320,
+          y: 400,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "NET_P_HIGH" },
+            { id: "2", name: "2", net: "NET_B_Q3" },
+          ],
+        },
+        {
+          id: "q_high",
+          type: "npn_bjt",
+          designator: "Q3",
+          value: "BC547",
+          footprint: "TO-92",
+          x: 440,
+          y: 420,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "B", net: "NET_B_Q3" },
+            { id: "2", name: "C", net: "NET_HIGH_SINK" },
+            { id: "3", name: "E", net: "GND" },
+          ],
+        },
+        {
+          id: "r_led3",
+          type: "resistor",
+          designator: "R6",
+          value: "330Ω",
+          footprint: "R0805",
+          x: 440,
+          y: 350,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "1", net: "VCC" },
+            { id: "2", name: "2", net: "NET_A_LED3" },
+          ],
+        },
+        {
+          id: "led_high",
+          type: "led_red",
+          designator: "LED3",
+          value: "Red (Full Level)",
+          footprint: "LED-5MM-RED",
+          x: 560,
+          y: 380,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "A", net: "NET_A_LED3" },
+            { id: "2", name: "K", net: "NET_HIGH_SINK" },
+          ],
+        },
+        {
+          id: "bz_alarm",
+          type: "buzzer_piezo",
+          designator: "BZ1",
+          value: "5V/9V Piezo Buzzer",
+          footprint: "BUZZER-12MM",
+          x: 680,
+          y: 420,
+          rotation: 0,
+          pins: [
+            { id: "1", name: "+", net: "VCC" },
+            { id: "2", name: "-", net: "NET_HIGH_SINK" },
+          ],
+        },
+      ],
+      nets: [
+        { name: "VCC", color: "#ef4444" },
+        { name: "GND", color: "#1e293b" },
+        { name: "NET_P_LOW", color: "#10b981" },
+        { name: "NET_P_MID", color: "#eab308" },
+        { name: "NET_P_HIGH", color: "#f43f5e" },
+        { name: "NET_B_Q1", color: "#3b82f6" },
+        { name: "NET_B_Q2", color: "#8b5cf6" },
+        { name: "NET_B_Q3", color: "#ec4899" },
+        { name: "NET_A_LED1", color: "#06b6d4" },
+        { name: "NET_A_LED2", color: "#f97316" },
+        { name: "NET_A_LED3", color: "#ef4444" },
+        { name: "NET_LED_LOW", color: "#059669" },
+        { name: "NET_LED_MID", color: "#d97706" },
+        { name: "NET_HIGH_SINK", color: "#dc2626" },
       ],
     };
   }
@@ -2471,7 +2742,7 @@ async function fetchEasyEdaCircuitServer(uuid: string): Promise<any> {
           }
         }
 
-        if (components.some((c) => c.value.toLowerCase().includes("lm2596") || c.designator === "U1")) {
+        if (components.some((c) => c.value.toLowerCase().includes("lm2596"))) {
           return generateFallbackCircuit("lm2596 0b44da0e");
         }
 
@@ -2503,7 +2774,7 @@ async function fetchEasyEdaCircuitServer(uuid: string): Promise<any> {
     console.warn("[EasyEDA Server Fetch Error]", err);
   }
 
-  return generateFallbackCircuit("lm2596 0b44da0e");
+  return null;
 }
 
 // Dedicated EasyEDA fetch & synthesize endpoint
@@ -2513,6 +2784,10 @@ app.all(["/api/circuit/easyeda", "/api/circuit/easyeda/"], async (req, res) => {
   const uuid = uuidMatch ? uuidMatch[1] : "0b44da0e66aa4101b02e0973e40419f8";
   try {
     const circuit = await fetchEasyEdaCircuitServer(uuid);
+    if (!circuit) {
+      res.status(404).json({ error: `EasyEDA component ${uuid} could not be retrieved` });
+      return;
+    }
     res.json({ success: true, circuit, modelUsed: "easyeda_native_engine" });
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to fetch EasyEDA component" });
@@ -2569,15 +2844,11 @@ app.all(GENERATE_ROUTES, async (req, res) => {
       : null;
     const targetUrl = rawTargetUrl || (promptUrlMatch ? promptUrlMatch[0] : '');
 
-    // 0. Check for EasyEDA component/circuit URL, image URL, or 32-character hexadecimal UUID
-    const easyEdaUuidMatch = (targetUrl + " " + effectivePrompt).match(/\b([0-9a-fA-F]{32})\b/);
-    if (
-      easyEdaUuidMatch ||
-      targetUrl.includes("easyeda.com") ||
-      targetUrl.includes("oshwhub.com") ||
-      effectivePrompt.toLowerCase().includes("easyeda")
-    ) {
-      const uuid = easyEdaUuidMatch ? easyEdaUuidMatch[1] : "0b44da0e66aa4101b02e0973e40419f8";
+    // 0. Check for authentic EasyEDA component/circuit URL or 32-character hexadecimal UUID
+    const isExplicitEasyEda = targetUrl.includes("easyeda.com") || targetUrl.includes("oshwhub.com");
+    const easyEdaUuidMatch = isExplicitEasyEda ? targetUrl.match(/\b([0-9a-fA-F]{32})\b/) : null;
+    if (easyEdaUuidMatch) {
+      const uuid = easyEdaUuidMatch[1];
       try {
         const easyEdaCircuit = await fetchEasyEdaCircuitServer(uuid);
         if (easyEdaCircuit) {
@@ -2595,6 +2866,23 @@ app.all(GENERATE_ROUTES, async (req, res) => {
     }
 
     if (targetUrl) {
+      // Extract URL slug to ensure the circuit topic is known even if page fetch fails or is slow
+      try {
+        const parsedUrl = new URL(targetUrl.startsWith('http') ? targetUrl : `https://${targetUrl}`);
+        const slug = parsedUrl.pathname.split('/').filter(Boolean).pop() || '';
+        if (slug) {
+          const cleanSlug = slug
+            .replace(/\.(html|php|asp|htm|png|jpg|jpeg|webp)$/i, '')
+            .replace(/[-_]+/g, ' ')
+            .trim();
+          if (cleanSlug && !effectivePrompt.toLowerCase().includes(cleanSlug.toLowerCase())) {
+            effectivePrompt = `${cleanSlug} - ${effectivePrompt}`.trim();
+          }
+        }
+      } catch {
+        // ignore url slug parse error
+      }
+
       // 1. Check for YouTube video link pattern
       const ytMatch = targetUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/);
       if (ytMatch) {
@@ -2681,7 +2969,7 @@ Carefully inspect and analyze the circuit diagram, schematic, breadboard wiring,
         // 2. Generic external link or image URL
         try {
           const fetchCtrl = new AbortController();
-          const timeout = setTimeout(() => fetchCtrl.abort(), 6000);
+          const timeout = setTimeout(() => fetchCtrl.abort(), 12000);
           const fetched = await fetch(targetUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
             signal: fetchCtrl.signal,
@@ -2881,9 +3169,7 @@ Return valid JSON adhering to the specified schema. Ensure all critical power (V
         {
           totalTimeoutMs: isImageReq ? 45000 : 14000,
           perAttemptTimeoutMs: isImageReq ? 25000 : 6500,
-          models: isImageReq
-            ? ["gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-flash-latest", "gemini-3.1-flash-lite"]
-            : CANDIDATE_MODELS,
+          models: CANDIDATE_MODELS,
         }
       );
 

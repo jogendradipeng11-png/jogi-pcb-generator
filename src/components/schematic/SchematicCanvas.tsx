@@ -84,6 +84,7 @@ interface SchematicCanvasProps {
   onOpenChatDrawer?: () => void;
   onOpenAutoCorrect?: () => void;
   onOpenPinoutModal?: (comp: SchematicComponent) => void;
+  onOpenDiagnostics?: () => void;
   onClearCanvas?: () => void;
   onShowToast?: (msg: string) => void;
   onZoomFit?: () => void;
@@ -119,10 +120,14 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
   onOpenChatDrawer,
   onOpenAutoCorrect,
   onOpenPinoutModal,
+  onOpenDiagnostics,
   onClearCanvas,
   onShowToast,
 }) => {
   const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // Electrical alert dismissal toggle
+  const [warningsDismissed, setWarningsDismissed] = useState(false);
 
   // Clipboard and Right-Click Context Menu states
   const [canvasClipboard, setCanvasClipboard] = useState<{
@@ -2803,34 +2808,101 @@ export const SchematicCanvas: React.FC<SchematicCanvasProps> = ({
         </div>
       )}
 
-      {/* Electrical Health & Damage Alert Banner */}
+      {/* Electrical Health & Damage Alert Banner (Visual failure feedback & notifications) */}
       {isSimulating && simulationState?.warnings && simulationState.warnings.length > 0 && (
-        <div className="absolute top-3 left-4 max-w-md z-30 space-y-1.5 animate-in fade-in slide-in-from-top-2 pointer-events-auto">
-          {simulationState.warnings.slice(0, 3).map((warn, idx) => {
-            const isBurnout = warn.includes('BURNOUT') || warn.includes('destroyed') || warn.includes('BREAKDOWN');
-            return (
-              <div
-                key={idx}
-                className={`flex items-start gap-2.5 p-2.5 rounded-lg border text-xs shadow-2xl backdrop-blur-md ${
-                  isBurnout
-                    ? 'bg-rose-950/95 border-rose-500/80 text-rose-100 shadow-rose-950/50'
-                    : 'bg-amber-950/95 border-amber-500/80 text-amber-100 shadow-amber-950/50'
-                }`}
-              >
-                <AlertCircle
-                  className={`w-4 h-4 shrink-0 mt-0.5 ${isBurnout ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`}
-                />
-                <div className="flex-1 font-sans leading-tight">
-                  <div className="font-bold flex items-center justify-between mb-0.5 font-mono text-[10.5px]">
-                    <span className={isBurnout ? 'text-rose-300' : 'text-amber-300'}>
-                      {isBurnout ? '⚡ ELECTRICAL DAMAGE DETECTED' : '⚠️ CIRCUIT HEALTH WARNING'}
-                    </span>
-                  </div>
-                  <div className="text-[11px] leading-relaxed">{warn}</div>
+        <div className="absolute top-3 left-4 max-w-md z-30 space-y-2 animate-in fade-in slide-in-from-top-2 pointer-events-auto">
+          {warningsDismissed ? (
+            <button
+              onClick={() => setWarningsDismissed(false)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-rose-950/95 border border-rose-500 text-rose-200 text-xs font-mono shadow-xl hover:bg-rose-900/90 transition-all cursor-pointer animate-pulse"
+              title="Click to view electrical fault notifications"
+            >
+              <span className="w-2 h-2 rounded-full bg-rose-400" />
+              <span className="font-bold">🔥 {simulationState.warnings.length} Circuit Fault{simulationState.warnings.length > 1 ? 's' : ''} Detected</span>
+              <span className="text-[10px] text-rose-300 underline font-sans ml-1">Inspect</span>
+            </button>
+          ) : (
+            <div className="bg-slate-900/95 border border-rose-600/80 rounded-xl shadow-2xl overflow-hidden backdrop-blur-md">
+              {/* Header */}
+              <div className="flex items-center justify-between px-3.5 py-2 bg-gradient-to-r from-rose-950/90 to-red-950/80 border-b border-rose-700/60 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-2.5 w-2.5 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
+                  </span>
+                  <span className="font-bold text-rose-200 font-mono text-[11px] tracking-wide">
+                    ⚡ ELECTRICAL DAMAGE NOTIFICATION ({simulationState.warnings.length})
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  {onOpenDiagnostics && (
+                    <button
+                      onClick={onOpenDiagnostics}
+                      className="px-2 py-0.5 rounded bg-rose-900/60 hover:bg-rose-800 text-[10px] font-semibold text-rose-200 border border-rose-700/60 transition-colors cursor-pointer"
+                      title="Open full diagnostic test report with remedies"
+                    >
+                      Diagnose All
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setWarningsDismissed(true)}
+                    className="p-1 rounded text-rose-300 hover:text-white hover:bg-rose-900/60 transition-colors cursor-pointer text-xs"
+                    title="Minimize alert notifications"
+                  >
+                    ✕
+                  </button>
                 </div>
               </div>
-            );
-          })}
+
+              {/* Warnings List */}
+              <div className="p-3 space-y-2.5 max-h-64 overflow-y-auto divide-y divide-slate-800/80">
+                {simulationState.warnings.slice(0, 3).map((warn, idx) => {
+                  const isBurnout = warn.includes('BURNOUT') || warn.includes('destroyed') || warn.includes('BREAKDOWN') || warn.includes('BURST');
+                  
+                  // Try to find matching component
+                  const matchedComp = components.find((c) =>
+                    (c.designator && warn.includes(c.designator)) ||
+                    (c.name && warn.includes(c.name))
+                  );
+
+                  return (
+                    <div key={idx} className={idx > 0 ? 'pt-2.5' : ''}>
+                      <div className="flex items-start gap-2 text-xs">
+                        <span className="text-base shrink-0 mt-0.5">{isBurnout ? '🔥' : '⚠️'}</span>
+                        <div className="flex-1 leading-snug">
+                          <p className="text-[11.5px] font-medium text-slate-100">
+                            {warn}
+                          </p>
+                          {matchedComp && (
+                            <div className="mt-1.5 flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  onSelectComponents([matchedComp.id]);
+                                  // Pan canvas to center on component
+                                  onPanChange({
+                                    x: window.innerWidth / 2 - matchedComp.position.x * zoom,
+                                    y: window.innerHeight / 2 - matchedComp.position.y * zoom,
+                                  });
+                                }}
+                                className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 text-[10px] font-mono border border-slate-700 transition-colors cursor-pointer flex items-center gap-1"
+                              >
+                                <span>Focus {matchedComp.designator || matchedComp.name}</span>
+                              </button>
+                              {warn.includes('LED') && (
+                                <span className="text-[10.5px] text-amber-300/90 font-sans">
+                                  💡 Add 220Ω–1kΩ series resistor to protect LED
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

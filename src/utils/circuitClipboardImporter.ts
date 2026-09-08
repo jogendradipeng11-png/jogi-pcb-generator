@@ -97,7 +97,7 @@ export function parseCircuitInfoFromUrl(urlStr: string): { title: string; prompt
  */
 export async function importCircuitFromImageDataUrl(dataUrl: string): Promise<ImportedCircuitResult> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 14000);
+  const timeoutId = setTimeout(() => controller.abort(), 28000);
 
   try {
     const response = await fetch('/api/circuit/generate', {
@@ -218,7 +218,7 @@ export async function importCircuitFromUrlOrText(textOrUrl: string): Promise<Imp
   // Try server-side generation with online URL / image link
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
     const response = await fetch('/api/circuit/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

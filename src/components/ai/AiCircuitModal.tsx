@@ -187,18 +187,19 @@ export const AiCircuitModal: React.FC<AiCircuitModalProps> = ({
 
       if (!response.ok) {
         // If 404 (endpoint not hosted on static deployment like Vercel or GitHub Pages),
-        // or 5xx server error, seamlessly activate client EDA synthesizer immediately!
+        // 429 (quota / rate limit reached), or 5xx server error, seamlessly activate client EDA synthesizer immediately!
         if (
           response.status === 404 ||
           response.status === 405 ||
+          response.status === 429 ||
           response.status === 500 ||
           response.status === 502 ||
           response.status === 503 ||
           response.status === 504
         ) {
-          console.warn(`[Auto-Recovery] Server responded with status ${response.status} (Vercel/Static Host). Activating Instant Client EDA Synthesizer...`);
+          console.warn(`[Auto-Recovery] Server responded with status ${response.status}. Activating Instant Client EDA Synthesizer...`);
           const clientDoc = synthesizeClientCircuit(textToUse);
-          setModelUsed('Instant Client EDA Synthesizer (Vercel/Static Mode)');
+          setModelUsed('Instant Client EDA Synthesizer');
           setIsFallbackUsed(true);
           setGeneratedCircuit(clientDoc);
           setError(null);

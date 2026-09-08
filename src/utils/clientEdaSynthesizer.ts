@@ -9,18 +9,8 @@ export function synthesizeClientCircuit(prompt: string, hintTitle?: string): Sch
   let p = (prompt || '').toLowerCase();
   let extractedUrlTitle = '';
 
-  // Direct check for EasyEDA / LM2596 Step-Down Buck Converter
-  if (
-    p.includes('0b44da0e') ||
-    p.includes('easyeda') ||
-    p.includes('lm2596') ||
-    (p.includes('buck') && (p.includes('converter') || p.includes('regulator') || p.includes('step-down') || p.includes('3a') || p.includes('power')))
-  ) {
-    return getBuiltinLM2596BuckCircuit();
-  }
-
   // Extract article slug if user pasted a URL (e.g., https://www.circuits-diy.com/555-timer-flasher-circuit/)
-  if (p.includes('circuits-diy.com') || p.startsWith('http')) {
+  if (p.includes('http') || p.includes('.com') || p.includes('.org') || p.includes('.net') || p.includes('.io')) {
     try {
       const urlMatch = prompt.trim().match(/https?:\/\/[^\s"'<>]+/);
       const urlStr = urlMatch ? urlMatch[0] : prompt.trim();
@@ -28,13 +18,24 @@ export function synthesizeClientCircuit(prompt: string, hintTitle?: string): Sch
       const slug = urlObj.pathname.split('/').filter(Boolean).pop() || '';
       if (slug) {
         extractedUrlTitle = slug
-          .replace(/[-_]/g, ' ')
-          .replace(/\b\w/g, (c) => c.toUpperCase());
+          .replace(/\.(html|php|asp|htm|png|jpg|jpeg|webp)$/i, '')
+          .replace(/[-_]+/g, ' ')
+          .replace(/\b\w/g, (c) => c.toUpperCase())
+          .trim();
         p = `${extractedUrlTitle.toLowerCase()} ${p}`;
       }
     } catch {
       // ignore URL parsing error
     }
+  }
+
+  // Direct check for EasyEDA / LM2596 Step-Down Buck Converter (only when strictly requested)
+  if (
+    p.includes('0b44da0e') ||
+    p.includes('lm2596') ||
+    (p.includes('buck') && (p.includes('step-down') || p.includes('3a') || p.includes('lm2596')))
+  ) {
+    return getBuiltinLM2596BuckCircuit();
   }
 
   let title = extractedUrlTitle || hintTitle || 'Electronic Circuit Schematic';
@@ -57,8 +58,239 @@ export function synthesizeClientCircuit(prompt: string, hintTitle?: string): Sch
     pins: Array<{ id: string; name: string; net: string }>;
   }> = [];
 
+  // --- 0. WATER LEVEL INDICATOR / LIQUID LEVEL CONTROLLER (Circuits-DIY classic: BC547 probes + LEDs + Buzzer) ---
+  if (p.includes('water') || p.includes('liquid') || p.includes('tank') || p.includes('level indicator') || p.includes('water-level')) {
+    title = extractedUrlTitle || 'Water Level Indicator using Transistors (Circuits-DIY)';
+    category = 'Sensors & Switching';
+    summary = 'Automatic multi-level water tank depth indicator circuit utilizing BC547 NPN transistors as water conductivity switches, with color-coded status LEDs and an acoustic overflow buzzer.';
+    formula = 'Water conductivity completes the path from COM (+VCC) to base probe, biasing Vbe > 0.7V to turn ON the corresponding transistor.';
+    specifications = [
+      'Operating Voltage: 9V DC Battery / Power Supply',
+      'Level Indicators: Low (Green LED), Medium (Yellow LED), Full (Red LED + Buzzer)',
+      'Sensing Probes: Stainless steel or copper wire probes submerged at calibrated heights',
+      'Standby Current: < 100µA (Zero current when probes are dry)',
+    ];
+    tips = [
+      'The common probe wire (COM) sits at the bottom of the water reservoir connected directly to +9V.',
+      'As the water level rises to touch each probe, current flows through the water into the base of the transistor, illuminating the LED.',
+      'The high-level transistor Q3 also drives buzzer BZ1 to immediately alert when the tank is full.',
+    ];
+    rawComponents = [
+      {
+        id: 'c_vcc',
+        type: 'vcc',
+        designator: 'VCC1',
+        value: '+9V',
+        footprint: 'POWER_PORT',
+        x: 120,
+        y: 80,
+        pins: [{ id: '1', name: 'VCC', net: 'VCC' }],
+      },
+      {
+        id: 'c_gnd',
+        type: 'gnd',
+        designator: 'GND1',
+        value: 'GND',
+        footprint: 'POWER_PORT',
+        x: 120,
+        y: 520,
+        pins: [{ id: '1', name: 'GND', net: 'GND' }],
+      },
+      {
+        id: 'c_probes',
+        type: 'connector_4pin',
+        designator: 'J_PROBES',
+        value: 'Water Probes (COM/LOW/MID/HIGH)',
+        footprint: 'HDR-1X4',
+        x: 200,
+        y: 260,
+        pins: [
+          { id: '1', name: 'COM_+V', net: 'VCC' },
+          { id: '2', name: 'PROBE_LOW', net: 'NET_P_LOW' },
+          { id: '3', name: 'PROBE_MID', net: 'NET_P_MID' },
+          { id: '4', name: 'PROBE_HIGH', net: 'NET_P_HIGH' },
+        ],
+      },
+      // Low Level Stage
+      {
+        id: 'c_r1',
+        type: 'resistor',
+        designator: 'R1',
+        value: '1kΩ',
+        footprint: 'R0805',
+        x: 320,
+        y: 160,
+        pins: [
+          { id: '1', name: '1', net: 'NET_P_LOW' },
+          { id: '2', name: '2', net: 'NET_B_Q1' },
+        ],
+      },
+      {
+        id: 'c_q1',
+        type: 'npn_bjt',
+        designator: 'Q1',
+        value: 'BC547',
+        footprint: 'TO-92',
+        x: 440,
+        y: 180,
+        pins: [
+          { id: '1', name: 'B', net: 'NET_B_Q1' },
+          { id: '2', name: 'C', net: 'NET_LED_LOW' },
+          { id: '3', name: 'E', net: 'GND' },
+        ],
+      },
+      {
+        id: 'c_r_led1',
+        type: 'resistor',
+        designator: 'R4',
+        value: '330Ω',
+        footprint: 'R0805',
+        x: 440,
+        y: 80,
+        pins: [
+          { id: '1', name: '1', net: 'VCC' },
+          { id: '2', name: '2', net: 'NET_A_LED1' },
+        ],
+      },
+      {
+        id: 'c_led1',
+        type: 'led_green',
+        designator: 'LED1',
+        value: 'Green (Low Level)',
+        footprint: 'LED-5MM-GRN',
+        x: 560,
+        y: 140,
+        pins: [
+          { id: '1', name: 'A', net: 'NET_A_LED1' },
+          { id: '2', name: 'K', net: 'NET_LED_LOW' },
+        ],
+      },
+      // Medium Level Stage
+      {
+        id: 'c_r2',
+        type: 'resistor',
+        designator: 'R2',
+        value: '1kΩ',
+        footprint: 'R0805',
+        x: 320,
+        y: 280,
+        pins: [
+          { id: '1', name: '1', net: 'NET_P_MID' },
+          { id: '2', name: '2', net: 'NET_B_Q2' },
+        ],
+      },
+      {
+        id: 'c_q2',
+        type: 'npn_bjt',
+        designator: 'Q2',
+        value: 'BC547',
+        footprint: 'TO-92',
+        x: 440,
+        y: 300,
+        pins: [
+          { id: '1', name: 'B', net: 'NET_B_Q2' },
+          { id: '2', name: 'C', net: 'NET_LED_MID' },
+          { id: '3', name: 'E', net: 'GND' },
+        ],
+      },
+      {
+        id: 'c_r_led2',
+        type: 'resistor',
+        designator: 'R5',
+        value: '330Ω',
+        footprint: 'R0805',
+        x: 440,
+        y: 220,
+        pins: [
+          { id: '1', name: '1', net: 'VCC' },
+          { id: '2', name: '2', net: 'NET_A_LED2' },
+        ],
+      },
+      {
+        id: 'c_led2',
+        type: 'led_yellow',
+        designator: 'LED2',
+        value: 'Yellow (Mid Level)',
+        footprint: 'LED-5MM-YEL',
+        x: 560,
+        y: 260,
+        pins: [
+          { id: '1', name: 'A', net: 'NET_A_LED2' },
+          { id: '2', name: 'K', net: 'NET_LED_MID' },
+        ],
+      },
+      // High Level Stage with Buzzer
+      {
+        id: 'c_r3',
+        type: 'resistor',
+        designator: 'R3',
+        value: '1kΩ',
+        footprint: 'R0805',
+        x: 320,
+        y: 400,
+        pins: [
+          { id: '1', name: '1', net: 'NET_P_HIGH' },
+          { id: '2', name: '2', net: 'NET_B_Q3' },
+        ],
+      },
+      {
+        id: 'c_q3',
+        type: 'npn_bjt',
+        designator: 'Q3',
+        value: 'BC547',
+        footprint: 'TO-92',
+        x: 440,
+        y: 420,
+        pins: [
+          { id: '1', name: 'B', net: 'NET_B_Q3' },
+          { id: '2', name: 'C', net: 'NET_HIGH_SINK' },
+          { id: '3', name: 'E', net: 'GND' },
+        ],
+      },
+      {
+        id: 'c_r_led3',
+        type: 'resistor',
+        designator: 'R6',
+        value: '330Ω',
+        footprint: 'R0805',
+        x: 440,
+        y: 350,
+        pins: [
+          { id: '1', name: '1', net: 'VCC' },
+          { id: '2', name: '2', net: 'NET_A_LED3' },
+        ],
+      },
+      {
+        id: 'c_led3',
+        type: 'led_red',
+        designator: 'LED3',
+        value: 'Red (Full Level)',
+        footprint: 'LED-5MM-RED',
+        x: 560,
+        y: 380,
+        pins: [
+          { id: '1', name: 'A', net: 'NET_A_LED3' },
+          { id: '2', name: 'K', net: 'NET_HIGH_SINK' },
+        ],
+      },
+      {
+        id: 'c_buzzer',
+        type: 'buzzer_piezo',
+        designator: 'BZ1',
+        value: '5V/9V Piezo Buzzer',
+        footprint: 'BUZZER-12MM',
+        x: 680,
+        y: 420,
+        pins: [
+          { id: '1', name: '+', net: 'VCC' },
+          { id: '2', name: '-', net: 'NET_HIGH_SINK' },
+        ],
+      },
+    ];
+  }
+
   // --- 1. LIGHT-ACTIVATED DARK SENSOR (Circuits-DIY classic: LDR + Transistor/Relay) ---
-  if (p.includes('ldr') || p.includes('dark sensor') || p.includes('light sensor') || p.includes('light-activated') || p.includes('night light')) {
+  else if (p.includes('ldr') || p.includes('dark sensor') || p.includes('light sensor') || p.includes('light-activated') || p.includes('night light')) {
     title = extractedUrlTitle || 'Light-Activated Relay Switch (Circuits-DIY)';
     category = 'Sensors & Switching';
     summary = 'Automatic night light/dark sensor switch circuit using an LDR, potentiometer threshold adjustment, 2N2222 NPN transistor, and relay/LED output.';

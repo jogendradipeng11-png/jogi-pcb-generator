@@ -1377,6 +1377,16 @@ export function getComponentDef(type: string): ComponentDefinition {
     pushbutton: 'switch_spst',
     button: 'switch_spst',
     switch: 'switch_spst',
+    led_green: 'led',
+    led_red: 'led',
+    led_yellow: 'led',
+    led_blue: 'led',
+    led_white: 'led',
+    led_amber: 'led',
+    indicator_led: 'led',
+    led_indicator: 'led',
+    resistor_smd: 'resistor',
+    resistor_tht: 'resistor',
   };
 
   const targetType = aliasMap[normalized] || aliasMap[raw];

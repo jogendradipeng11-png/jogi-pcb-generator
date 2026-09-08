@@ -2,7 +2,7 @@ import { SchematicDocument, SchematicComponent, Wire } from '../types';
 import { autoRouteSchematicNets } from './autorouter';
 
 /**
- * Extracts a 32-character hexadecimal UUID from an EasyEDA URL or text
+ * Extracts a 32-character hexadecimal UUID from an EasyEDA URL or standalone UUID
  * e.g. https://image.easyeda.com/components/0b44da0e66aa4101b02e0973e40419f8.png
  * or easyeda.com/editor#id=0b44da0e66aa4101b02e0973e40419f8
  */
@@ -10,30 +10,49 @@ export function extractEasyEdaUuid(urlOrText: string): string | null {
   if (!urlOrText || typeof urlOrText !== 'string') return null;
   const clean = urlOrText.trim();
   
-  // Direct UUID
+  // Direct UUID - only if the clean text is exactly 32 hex characters
   if (/^[0-9a-fA-F]{32}$/.test(clean)) {
     return clean;
   }
   
-  // In URL or text
-  const match = clean.match(/\b([0-9a-fA-F]{32})\b/);
-  if (match) {
-    return match[1];
+  // Must be an actual EasyEDA or OSHWHUB link or explicit easyeda reference
+  if (
+    clean.includes('easyeda.com') ||
+    clean.includes('oshwhub.com') ||
+    /\beasyeda\b/i.test(clean)
+  ) {
+    const match = clean.match(/\b([0-9a-fA-F]{32})\b/);
+    if (match) {
+      return match[1];
+    }
   }
   
   return null;
 }
 
 /**
- * Checks if text or URL contains an EasyEDA reference
+ * Checks if text or URL contains an authentic EasyEDA reference
  */
 export function isEasyEdaUrlOrUuid(urlOrText: string): boolean {
-  if (!urlOrText) return false;
-  return (
-    urlOrText.includes('easyeda.com') ||
-    urlOrText.includes('oshwhub.com') ||
-    Boolean(extractEasyEdaUuid(urlOrText))
-  );
+  if (!urlOrText || typeof urlOrText !== 'string') return false;
+  const clean = urlOrText.trim();
+  
+  // Standalone 32-char UUID
+  if (/^[0-9a-fA-F]{32}$/.test(clean)) {
+    return true;
+  }
+  
+  // EasyEDA / OSHWHUB domain
+  if (clean.includes('easyeda.com') || clean.includes('oshwhub.com')) {
+    return true;
+  }
+
+  // Explicit easyeda keyword with valid UUID
+  if (/\beasyeda\b/i.test(clean) && /\b([0-9a-fA-F]{32})\b/.test(clean)) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -465,6 +484,6 @@ export async function fetchAndParseEasyEdaCircuit(
     // Fallback below
   }
 
-  // If both network queries fail, return verified LM2596 buck converter
-  return getBuiltinLM2596BuckCircuit();
+  // If network queries fail to fetch EasyEDA component data, throw so the caller can fall through to AI / Web / Client EDA synthesis
+  throw new Error(`Unable to fetch or parse EasyEDA component data for UUID ${uuid}.`);
 }

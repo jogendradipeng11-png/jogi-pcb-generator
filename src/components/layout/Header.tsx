@@ -47,6 +47,7 @@ import {
   Copy,
   Upload,
   Brain,
+  AlertTriangle,
 } from 'lucide-react';
 import { EditorTool, CanvasViewMode, SchematicDocument, UserProfile, SimulationState, SchematicComponent, Wire, SimulationScenario, OperatingConditions } from '../../types';
 import { STARTER_CIRCUITS } from '../../data/examples';
@@ -110,6 +111,7 @@ interface HeaderProps {
   onOpenAllDataSheetModal?: () => void;
   onInsertPowerReferences?: () => void;
   onOpenGitHubModal?: () => void;
+  onOpenDiagnostics?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -131,6 +133,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCircuitsDiy,
   onOpenPinoutModal,
   onOpenAutoCorrectModal,
+  onOpenDiagnostics,
   onSaveCircuit,
   onPasteFromClipboard,
   onCopySelected,
@@ -306,6 +309,32 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
 
+              {/* Circuit Health & Diagnostic Fault Test Button */}
+              {onOpenDiagnostics && (
+                <button
+                  onClick={onOpenDiagnostics}
+                  className={`px-2.5 py-1.5 text-xs font-semibold rounded-md flex items-center gap-1.5 transition-all border cursor-pointer ${
+                    simulationState?.warnings && simulationState.warnings.length > 0
+                      ? 'bg-rose-950/90 hover:bg-rose-900 border-rose-600 text-rose-200 shadow-md shadow-rose-950/40 animate-pulse'
+                      : 'bg-slate-900 hover:bg-slate-800 text-amber-300 hover:text-amber-200 border-slate-800 hover:border-slate-700'
+                  }`}
+                  title="Run automated electrical rule checks, overcurrent, LED burnout, and short circuit diagnostic test"
+                >
+                  <AlertTriangle
+                    className={`w-3.5 h-3.5 ${
+                      simulationState?.warnings && simulationState.warnings.length > 0
+                        ? 'text-rose-400'
+                        : 'text-amber-400'
+                    }`}
+                  />
+                  <span>
+                    {simulationState?.warnings && simulationState.warnings.length > 0
+                      ? `Faults (${simulationState.warnings.length})`
+                      : 'Test Circuit'}
+                  </span>
+                </button>
+              )}
+
               {/* Reset Sim Time */}
               {onResetSimulation && (
                 <button
@@ -455,10 +484,10 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onPasteFromClipboard}
               className="px-2.5 py-1.5 bg-gradient-to-r from-amber-600/30 to-orange-600/30 hover:from-amber-600/50 hover:to-orange-600/50 text-amber-300 rounded-lg text-xs font-semibold border border-amber-500/40 hover:border-amber-400 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-              title="Auto-generate circuit on schematic from copied Google image, URL, or link address (Ctrl+V)"
+              title="Google Lens Circuit AI: Auto-read copied circuit image, URL, or link into schematic & PCB output (Ctrl+V)"
             >
               <ClipboardPaste className="w-3.5 h-3.5 text-amber-400" />
-              <span>Paste Web Circuit</span>
+              <span>Lens / Paste Circuit</span>
             </button>
           )}
 

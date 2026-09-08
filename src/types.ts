@@ -67,12 +67,14 @@ export interface ComponentTestSettings {
 export interface SchematicComponent {
   id: string;
   type: string;
+  name?: string;
   category?: ComponentCategory;
   designator: string; // e.g. "R1", "U1"
   value: string; // e.g. "10kΩ", "100nF", "NE555"
   footprint: string; // e.g. "R0805", "DIP-8"
   x: number;
   y: number;
+  position?: Point;
   rotation: 0 | 90 | 180 | 270;
   flipped?: boolean;
   pins: ComponentPinState[];
@@ -130,9 +132,25 @@ export interface ComponentSimResult {
   state?: string; // e.g. "ON", "OFF", "ACTIVE", "SATURATED", "DROPOUT"
   isOverloaded?: boolean;
   isBurnedOut?: boolean;
+  faultType?: 'led_burnout' | 'overcurrent' | 'reverse_breakdown' | 'resistor_burnout' | 'capacitor_explosion' | 'short_circuit' | 'wiring_fault';
+  faultMessage?: string;
+  remedy?: string;
   warning?: string;
   frequency?: number; // for oscillators
   dutyCycle?: number;
+}
+
+export interface CircuitDiagnosticFault {
+  componentId: string;
+  designator: string;
+  componentType: string;
+  faultType: 'led_burnout' | 'overcurrent' | 'reverse_breakdown' | 'resistor_burnout' | 'capacitor_explosion' | 'short_circuit' | 'wiring_fault';
+  severity: 'critical' | 'warning' | 'caution';
+  title: string;
+  description: string;
+  measured: string;
+  limit: string;
+  remedy: string;
 }
 
 export interface OperatingConditions {

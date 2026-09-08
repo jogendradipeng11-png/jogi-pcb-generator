@@ -28,41 +28,152 @@ export const ComponentGlyph: React.FC<ComponentGlyphProps> = ({
   const def = getComponentDef(component.type);
   const rot = component.rotation || 0;
 
-  // Check if LED is actively conducting
+  // Detect if component is an LED (by type, symbol, or name)
+  const isLed =
+    component.type === 'led' ||
+    component.type.startsWith('led_') ||
+    component.type.includes('led') ||
+    def.symbol === 'led' ||
+    (component.name && component.name.toLowerCase().includes('led'));
+
+  // Determine LED emission color
+  const getLedColor = () => {
+    const t = (component.type + ' ' + (component.value || '') + ' ' + (component.name || '')).toLowerCase();
+    if (t.includes('green')) return { lit: '#22c55e', glow: '#86efac', aura: '#22c55e' };
+    if (t.includes('yellow') || t.includes('amber')) return { lit: '#eab308', glow: '#fef08a', aura: '#eab308' };
+    if (t.includes('blue')) return { lit: '#3b82f6', glow: '#93c5fd', aura: '#3b82f6' };
+    if (t.includes('white')) return { lit: '#f8fafc', glow: '#ffffff', aura: '#e2e8f0' };
+    return { lit: '#ef4444', glow: '#fca5a5', aura: '#ef4444' };
+  };
+
+  const ledColors = getLedColor();
+
+  // Check if LED is burned out, overloaded, or lit
   const isLedBurnedOut =
-    component.type === 'led' &&
-    isSimulating &&
+    isLed &&
     Boolean(simulationResult?.isBurnedOut);
 
   const isLedOverloaded =
-    component.type === 'led' &&
-    isSimulating &&
+    isLed &&
     Boolean(simulationResult?.isOverloaded) &&
     !isLedBurnedOut;
 
   const isLedLit =
-    component.type === 'led' &&
-    isSimulating &&
-    simulationResult &&
-    simulationResult.current > 0.001 &&
-    !isLedBurnedOut;
+    isLed &&
+    Boolean(simulationResult && simulationResult.current > 0.0005 && !isLedBurnedOut);
 
   // Check switch state
   const isSwitchClosed = component.testSettings?.isClosed ?? true;
 
   // Render specific SVG symbol graphic based on component type
   const renderSymbolGraphic = () => {
+    if (isLed) {
+      return (
+        <g stroke="currentColor" strokeWidth="2" fill="none">
+          {/* Burnout / Damage Graphics: Smoke & Red Sparks */}
+          {isLedBurnedOut && (
+            <g className="animate-pulse">
+              {/* Expanding red shockwave ping */}
+              <circle cx="0" cy="0" r="30" fill="#ef4444" fillOpacity="0.35" className="animate-ping" />
+              <circle cx="0" cy="0" r="20" fill="#b91c1c" fillOpacity="0.5" />
+              {/* Smoke clouds rising above destroyed LED */}
+              <circle cx="2" cy="-16" r="8" fill="#334155" opacity="0.9" />
+              <circle cx="-6" cy="-28" r="11" fill="#475569" opacity="0.75" />
+              <circle cx="6" cy="-42" r="15" fill="#64748b" opacity="0.55" />
+              {/* Electric spark lines */}
+              <line x1="-12" y1="-12" x2="-26" y2="-26" stroke="#ef4444" strokeWidth="3" />
+              <line x1="12" y1="-12" x2="26" y2="-26" stroke="#f97316" strokeWidth="3" />
+              <line x1="0" y1="-16" x2="0" y2="-32" stroke="#ef4444" strokeWidth="2.5" />
+              <line x1="-14" y1="12" x2="-26" y2="22" stroke="#f97316" strokeWidth="2.5" />
+              <line x1="14" y1="12" x2="26" y2="22" stroke="#ef4444" strokeWidth="2.5" />
+            </g>
+          )}
+
+          {/* Overload Heat Aura */}
+          {isLedOverloaded && (
+            <>
+              <circle cx="0" cy="0" r="26" fill="#ef4444" fillOpacity="0.4" className="animate-ping" />
+              <circle cx="0" cy="0" r="18" fill="#f97316" fillOpacity="0.6" />
+            </>
+          )}
+
+          {/* Normal Lit Glow */}
+          {isLedLit && (
+            <>
+              <circle cx="0" cy="0" r="24" fill={ledColors.aura} fillOpacity="0.4" />
+              <circle cx="0" cy="0" r="15" fill={ledColors.glow} fillOpacity="0.65" />
+            </>
+          )}
+
+          <line x1="-25" y1="0" x2="-8" y2="0" stroke={isLedBurnedOut ? '#ef4444' : 'currentColor'} />
+          <line x1="8" y1="0" x2="25" y2="0" stroke={isLedBurnedOut ? '#ef4444' : 'currentColor'} />
+
+          {/* Diode body: charred obsidian/crimson if burned out, hot orange if overloaded, authentic color if normal */}
+          <polygon
+            points="-8,-10 -8,10 8,0"
+            fill={isLedBurnedOut ? '#450a0a' : isLedOverloaded ? '#ea580c' : isLedLit ? ledColors.lit : '#22c55e'}
+            stroke={isLedBurnedOut ? '#dc2626' : isLedOverloaded ? '#fef08a' : isLedLit ? '#dcfce7' : 'currentColor'}
+            strokeWidth={isLedBurnedOut ? '3' : isLedLit ? '2.5' : '1.5'}
+          />
+          <line x1="8" y1="-10" x2="8" y2="10" strokeWidth="2.5" stroke={isLedBurnedOut ? '#dc2626' : 'currentColor'} />
+
+          {/* Burnout crack inside semiconductor die */}
+          {isLedBurnedOut && (
+            <path d="M -5 -6 L -1 1 L 2 -4 L 6 4" stroke="#fca5a5" strokeWidth="2.5" />
+          )}
+
+          {/* Light emission arrows: crossed out with red X if destroyed, bright glow if lit */}
+          {!isLedBurnedOut ? (
+            <g stroke={isLedOverloaded ? '#ffedd5' : isLedLit ? '#fde047' : '#eab308'} strokeWidth={isLedLit || isLedOverloaded ? '2' : '1.5'}>
+              <line x1="2" y1="-12" x2="10" y2="-20" />
+              <polygon points="10,-20 6,-18 9,-15" fill={isLedLit ? '#fef08a' : '#eab308'} stroke="none" />
+              <line x1="8" y1="-8" x2="16" y2="-16" />
+              <polygon points="16,-16 12,-14 15,-11" fill={isLedLit ? '#fef08a' : '#eab308'} stroke="none" />
+            </g>
+          ) : (
+            <g stroke="#ef4444" strokeWidth="2.5">
+              {/* Red crossed out X */}
+              <line x1="2" y1="-20" x2="16" y2="-8" />
+              <line x1="2" y1="-8" x2="16" y2="-20" />
+            </g>
+          )}
+        </g>
+      );
+    }
+
     switch (component.type) {
-      case 'resistor':
+      case 'resistor': {
+        const isBurned = Boolean(simulationResult?.isBurnedOut);
+        const isOver = Boolean(simulationResult?.isOverloaded) && !isBurned;
         return (
           <g stroke="currentColor" strokeWidth="2" fill="none">
+            {/* Smoke & Heat if overloaded or burned */}
+            {isBurned && (
+              <g className="animate-pulse">
+                <rect x="-24" y="-12" width="48" height="24" rx="6" fill="#ef4444" fillOpacity="0.3" />
+                <circle cx="-6" cy="-14" r="6" fill="#475569" opacity="0.8" />
+                <circle cx="4" cy="-24" r="9" fill="#64748b" opacity="0.6" />
+                <circle cx="-2" cy="-36" r="12" fill="#94a3b8" opacity="0.4" />
+                <line x1="-10" y1="-10" x2="-18" y2="-18" stroke="#f97316" strokeWidth="2" />
+                <line x1="10" y1="-10" x2="18" y2="-18" stroke="#ef4444" strokeWidth="2" />
+              </g>
+            )}
+            {isOver && (
+              <rect x="-24" y="-12" width="48" height="24" rx="6" fill="#f97316" fillOpacity="0.25" className="animate-pulse" />
+            )}
             {/* Leads */}
-            <line x1="-30" y1="0" x2="-20" y2="0" />
-            <line x1="20" y1="0" x2="30" y2="0" />
+            <line x1="-30" y1="0" x2="-20" y2="0" stroke={isBurned ? '#ef4444' : 'currentColor'} />
+            <line x1="20" y1="0" x2="30" y2="0" stroke={isBurned ? '#ef4444' : 'currentColor'} />
             {/* Zigzag body */}
-            <path d="M -20 0 L -16 -8 L -8 8 L 0 -8 L 8 8 L 16 -8 L 20 0" strokeLinejoin="round" />
+            <path
+              d="M -20 0 L -16 -8 L -8 8 L 0 -8 L 8 8 L 16 -8 L 20 0"
+              strokeLinejoin="round"
+              stroke={isBurned ? '#dc2626' : isOver ? '#ea580c' : 'currentColor'}
+              strokeWidth={isBurned ? '3' : '2'}
+            />
           </g>
         );
+      }
 
       case 'pot':
         return (
@@ -1227,21 +1338,21 @@ export const ComponentGlyph: React.FC<ComponentGlyphProps> = ({
           textAnchor="middle"
           fontSize="11"
           fontWeight="bold"
-          fill="#38bdf8"
+          fill={simulationResult?.isBurnedOut ? '#ef4444' : simulationResult?.isOverloaded ? '#f59e0b' : '#38bdf8'}
           stroke="#0f172a"
           strokeWidth="0.5"
         >
-          {component.designator}
+          {simulationResult?.isBurnedOut ? `💥 ${component.designator}` : component.designator}
         </text>
         <text
           x={0}
           y={def.height / 2 + 13}
           textAnchor="middle"
           fontSize="9.5"
-          fill="#f1f5f9"
+          fill={simulationResult?.isBurnedOut ? '#fca5a5' : '#f1f5f9'}
           stroke="#0f172a"
           strokeWidth="0.5"
-          fontWeight="500"
+          fontWeight={simulationResult?.isBurnedOut ? 'bold' : '500'}
         >
           {component.value}
         </text>
@@ -1262,14 +1373,56 @@ export const ComponentGlyph: React.FC<ComponentGlyphProps> = ({
         )}
 
         {/* Live Simulation Telemetry (Current / Voltage / Frequency / Overload / Burnout) */}
-        {isSimulating && simulationResult && (
+        {simulationResult && (
           <g>
+            {/* Pulsing Red Warning Halo if component is Burned Out or Overloaded */}
+            {simulationResult.isBurnedOut && (
+              <g className="pointer-events-none">
+                <circle
+                  cx="0"
+                  cy="0"
+                  r={Math.max(def.width, def.height) * 0.75 + 10}
+                  fill="#ef4444"
+                  fillOpacity="0.22"
+                  stroke="#dc2626"
+                  strokeWidth="2.5"
+                  strokeDasharray="5 3"
+                  className="animate-pulse"
+                />
+                {/* Floating Top-Right Danger Tag */}
+                <g transform={`translate(${def.width / 2 - 2}, ${-def.height / 2 - 6})`}>
+                  <rect
+                    x="-6"
+                    y="-16"
+                    width="88"
+                    height="18"
+                    rx="9"
+                    fill="#7f1d1d"
+                    stroke="#ef4444"
+                    strokeWidth="1.5"
+                    className="animate-pulse"
+                  />
+                  <text
+                    x="38"
+                    y="-3"
+                    textAnchor="middle"
+                    fontSize="8.5"
+                    fontWeight="bold"
+                    fill="#fecaca"
+                  >
+                    💥 BURNT OUT
+                  </text>
+                </g>
+              </g>
+            )}
+
+            {/* Bottom Status / Value Badge */}
             <rect
-              x={simulationResult.isBurnedOut ? -48 : simulationResult.isOverloaded ? -44 : -36}
+              x={simulationResult.isBurnedOut ? -54 : simulationResult.isOverloaded ? -46 : -36}
               y={def.height / 2 + 18}
-              width={simulationResult.isBurnedOut ? 96 : simulationResult.isOverloaded ? 88 : 72}
-              height="15"
-              rx="3"
+              width={simulationResult.isBurnedOut ? 108 : simulationResult.isOverloaded ? 92 : 72}
+              height="16"
+              rx="4"
               fill={
                 simulationResult.isBurnedOut
                   ? '#450a0a'
@@ -1284,12 +1437,12 @@ export const ComponentGlyph: React.FC<ComponentGlyphProps> = ({
                   ? '#f59e0b'
                   : '#10b981'
               }
-              strokeWidth="1"
+              strokeWidth={simulationResult.isBurnedOut ? '2' : '1'}
               className={simulationResult.isBurnedOut ? 'animate-pulse' : undefined}
             />
             <text
               x="0"
-              y={def.height / 2 + 29}
+              y={def.height / 2 + 30}
               textAnchor="middle"
               fontSize="8"
               fontWeight="bold"
@@ -1302,7 +1455,9 @@ export const ComponentGlyph: React.FC<ComponentGlyphProps> = ({
               }
             >
               {simulationResult.isBurnedOut
-                ? `💥 BURNT (${(simulationResult.current * 1000).toFixed(0)}mA)`
+                ? isLed
+                  ? `💥 LED BURST (${(simulationResult.current * 1000).toFixed(0)}mA)`
+                  : `💥 BURNT (${(simulationResult.current * 1000).toFixed(0)}mA)`
                 : simulationResult.isOverloaded
                 ? `⚠️ OVERLOAD (${(simulationResult.current * 1000).toFixed(1)}mA)`
                 : simulationResult.frequency !== undefined

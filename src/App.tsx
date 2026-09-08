@@ -14,6 +14,7 @@ import {
   UserProfile,
   AllDataSheetComponent,
   CircuitRotationDirection,
+  CircuitDiagnosticFault,
 } from './types';
 import { STARTER_CIRCUITS } from './data/examples';
 import { getComponentDef, registerCustomComponentDef, COMPONENT_CATALOG } from './data/components';
@@ -39,6 +40,7 @@ import { KeyboardShortcutsModal } from './components/help/KeyboardShortcutsModal
 import { KeyboardShortcutsOverlay } from './components/help/KeyboardShortcutsOverlay';
 import { GitHubDeployModal } from './components/modals/GitHubDeployModal';
 import { AutoCorrectModal } from './components/modals/AutoCorrectModal';
+import { CircuitDiagnosticModal } from './components/modals/CircuitDiagnosticModal';
 import { CircuitsDiyExplorerModal } from './components/modals/CircuitsDiyExplorerModal';
 import { ComponentPinoutModal } from './components/modals/ComponentPinoutModal';
 import { ComponentCatalogModal, CatalogModalTab } from './components/modals/ComponentCatalogModal';
@@ -169,6 +171,7 @@ export default function App() {
   const [isGitHubModalOpen, setIsGitHubModalOpen] = useState(false);
   const [isCircuitsDiyOpen, setIsCircuitsDiyOpen] = useState(false);
   const [isAutoCorrectOpen, setIsAutoCorrectOpen] = useState(false);
+  const [isDiagnosticModalOpen, setIsDiagnosticModalOpen] = useState(false);
   const [isPinoutModalOpen, setIsPinoutModalOpen] = useState(false);
   const [isLoadDiagramModalOpen, setIsLoadDiagramModalOpen] = useState(false);
   const [isCircuitBrainOpen, setIsCircuitBrainOpen] = useState(false);
@@ -543,6 +546,80 @@ export default function App() {
     setAllDataSheetSearchQuery(query);
     setIsAllDataSheetModalOpen(true);
   }, []);
+
+  // Auto-Fix a diagnosed circuit fault (e.g. add current-limiting resistor to protect burned LED)
+  const handleAutoFixDiagnosticFault = useCallback(
+    (fault: CircuitDiagnosticFault) => {
+      const comp = (safeDoc.components || []).find((c) => c.id === fault.componentId);
+      if (!comp) {
+        setToastMessage('Target component not found in schematic.');
+        return;
+      }
+
+      if (comp.type === 'led' || fault.faultType === 'led_burnout') {
+        // Insert protective current-limiting resistor (330Ω)
+        const newRId = `R_fix_${Date.now()}`;
+        const existingResistors = (safeDoc.components || []).filter((c) => c.type === 'resistor');
+        const nextNum = existingResistors.length + 1;
+        const rDef = getComponentDef('resistor');
+
+        // Place resistor horizontally to the left of the LED anode
+        const rPos: Point = {
+          x: Math.round((comp.x - 70) / 10) * 10,
+          y: comp.y,
+        };
+
+        const newResistor: SchematicComponent = {
+          id: newRId,
+          type: 'resistor',
+          name: 'Resistor 330Ω',
+          designator: `R${nextNum}`,
+          value: '330Ω',
+          footprint: 'R0805',
+          x: rPos.x,
+          y: rPos.y,
+          position: rPos,
+          rotation: 0,
+          pins: (rDef?.pins || [
+            { id: '1', name: '1' },
+            { id: '2', name: '2' },
+          ]).map((p) => ({ id: p.id, name: p.name })),
+        };
+
+        // Connect Resistor Pin 2 to LED Pin 1
+        const ledDef = getComponentDef(comp.type);
+        const pin1Def = (ledDef?.pins || []).find((p) => p.id === '1') || { x: -25, y: 0 };
+        const connectingWire: Wire = {
+          id: `wire_fix_${Date.now()}`,
+          points: [
+            { x: rPos.x + 30, y: rPos.y },
+            { x: comp.x + pin1Def.x, y: comp.y + pin1Def.y },
+          ],
+          net: `NET_LED_R_${nextNum}`,
+          startPin: { componentId: newRId, pinId: '2' },
+          endPin: { componentId: comp.id, pinId: '1' },
+        };
+
+        const updatedDoc = sanitizeDocument({
+          ...safeDoc,
+          components: [...safeDoc.components, newResistor],
+          wires: [...safeDoc.wires, connectingWire],
+          updatedAt: new Date().toISOString(),
+        });
+
+        commitDocumentChange(updatedDoc);
+        setSelectedCompIds([newRId, comp.id]);
+        setSelectedWireIds([connectingWire.id]);
+        setToastMessage(
+          `✅ Auto-Fixed: Added 330Ω resistor (R${nextNum}) to protect LED ${comp.designator || 'D1'}`
+        );
+        setIsDiagnosticModalOpen(false);
+      } else {
+        setToastMessage(`Remedy: ${fault.remedy}`);
+      }
+    },
+    [safeDoc, commitDocumentChange]
+  );
 
   // Apply component data from AllDataSheet into schematic: directly adds component to circuit diagram
   const handleApplyAllDataSheetComponent = useCallback(
@@ -970,7 +1047,7 @@ export default function App() {
 
       if (imageFile) {
         e.preventDefault();
-        setToastMessage('🔍 Processing copied circuit diagram image... Synthesizing schematic...');
+        setToastMessage('🔍 Google Lens Circuit AI: Reading diagram components, pinouts & nets from image...');
         try {
           const dataUrl = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
@@ -983,7 +1060,7 @@ export default function App() {
           if (res.components && res.components.length > 0) {
             setViewMode('schematic');
             handleAddCircuitFromGoogle(res.components, res.wires);
-            setToastMessage(`⚡ Auto-generated circuit "${res.title}" from copied image onto schematic editor! Check and edit below.`);
+            setToastMessage(`⚡ Google Lens AI: Placed "${res.title}" with ${res.components.length} components & autorouted nets onto Schematic! Ready for ERC check & 2D/3D PCB output.`);
           }
         } catch (err) {
           console.error('Error importing circuit from image:', err);
@@ -1001,13 +1078,13 @@ export default function App() {
 
         if (isUrl || isCircuitKeyword) {
           e.preventDefault();
-          setToastMessage(`⚡ Auto-generating schematic from copied web link: ${trimmed.slice(0, 45)}...`);
+          setToastMessage(`🔍 Google Lens Circuit AI: Reading circuit data from URL ${trimmed.slice(0, 40)}...`);
           try {
             const res = await importCircuitFromUrlOrText(trimmed);
             if (res.components && res.components.length > 0) {
               setViewMode('schematic');
               handleAddCircuitFromGoogle(res.components, res.wires);
-              setToastMessage(`⚡ Auto-generated circuit "${res.title}" from copied web link onto schematic editor! Check and edit below.`);
+              setToastMessage(`⚡ Google Lens AI: Generated "${res.title}" with ${res.components.length} components on Schematic! Ready for checking & PCB output.`);
             }
           } catch (err) {
             console.error('Error importing circuit from link:', err);
@@ -1435,6 +1512,7 @@ export default function App() {
         onOpenCircuitsDiy={() => setIsCircuitsDiyOpen(true)}
         onOpenPinoutModal={() => setIsPinoutModalOpen(true)}
         onOpenAutoCorrectModal={() => setIsAutoCorrectOpen(true)}
+        onOpenDiagnostics={() => setIsDiagnosticModalOpen(true)}
         onSaveCircuit={handleSaveCircuit}
         onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
         onOpenAllDataSheetModal={() => handleOpenAllDataSheetModal()}
@@ -1500,6 +1578,7 @@ export default function App() {
               onOpenLoadDiagram={() => setIsLoadDiagramModalOpen(true)}
               onOpenChatDrawer={() => setIsChatDrawerOpen(true)}
               onOpenAutoCorrect={() => setIsAutoCorrectOpen(true)}
+              onOpenDiagnostics={() => setIsDiagnosticModalOpen(true)}
               onOpenPinoutModal={(comp) => {
                 setProductSelectorComp(comp);
                 setIsPinoutModalOpen(true);
@@ -1928,6 +2007,27 @@ export default function App() {
         onClose={() => setIsAutoCorrectOpen(false)}
         document={safeDoc}
         onApplyCorrection={handleApplyAutoCorrection}
+      />
+
+      {/* Circuit Diagnostic & Health Test Modal (burnout, LED burst, overcurrent, and power shorts) */}
+      <CircuitDiagnosticModal
+        isOpen={isDiagnosticModalOpen}
+        onClose={() => setIsDiagnosticModalOpen(false)}
+        components={safeDoc.components}
+        wires={safeDoc.wires}
+        simulationState={simulationState}
+        onFocusComponent={(compId) => {
+          setSelectedCompIds([compId]);
+          setSelectedWireIds([]);
+          const comp = (safeDoc.components || []).find((c) => c.id === compId);
+          if (comp) {
+            setPan({
+              x: Math.round(400 - comp.x * zoom),
+              y: Math.round(260 - comp.y * zoom),
+            });
+          }
+        }}
+        onAutoFixFault={handleAutoFixDiagnosticFault}
       />
 
       {/* Load Diagram, Document, or Rough Sketch Modal (AI Vision + Whiteboard + Zero 404/405 Global Importer) */}

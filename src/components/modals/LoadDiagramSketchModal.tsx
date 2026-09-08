@@ -228,25 +228,33 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
     setIsProcessing(true);
     setStatusMessage('Analyzing diagram elements, component symbols, and wiring routes...');
 
-    let activeImage = imageDataUrl;
-    if (activeTab === 'sketch') {
+    let activeImage: string | null = null;
+    if (activeTab === 'upload') {
+      activeImage = imageDataUrl;
+    } else if (activeTab === 'sketch') {
       activeImage = exportSketchToImage();
     }
 
-    let effectivePrompt = circuitPrompt.trim();
-    if (!effectivePrompt && pastedTextOrUrl.trim()) {
-      effectivePrompt = pastedTextOrUrl.trim();
-    }
-    if (!effectivePrompt && !activeImage) {
-      effectivePrompt = 'Electronic circuit schematic';
+    const cleanPasted = pastedTextOrUrl.trim();
+    const cleanPrompt = circuitPrompt.trim();
+
+    let effectivePrompt = '';
+    if (activeTab === 'paste') {
+      if (cleanPasted && cleanPrompt && cleanPasted !== cleanPrompt) {
+        effectivePrompt = `${cleanPasted} (${cleanPrompt})`;
+      } else {
+        effectivePrompt = cleanPasted || cleanPrompt || 'Electronic circuit schematic';
+      }
+    } else {
+      effectivePrompt = cleanPrompt || (cleanPasted ? cleanPasted : (activeImage ? 'Extract all schematic components, ICs, pins, and nets from diagram' : 'Electronic circuit schematic'));
     }
 
-    // 0. Direct check for EasyEDA URL or UUID
-    const combinedSource = `${pastedTextOrUrl} ${circuitPrompt} ${activeImage || ''}`;
-    if (isEasyEdaUrlOrUuid(combinedSource)) {
+    // 0. Direct check for authentic EasyEDA URL or standalone UUID (never test base64 image strings!)
+    const candidateEasySource = activeTab === 'paste' ? cleanPasted : (cleanPasted || cleanPrompt);
+    if (candidateEasySource && isEasyEdaUrlOrUuid(candidateEasySource)) {
       setStatusMessage('Extracting EasyEDA component library, verified footprints, pin definitions, and wiring nets...');
       try {
-        const easyDoc = await fetchAndParseEasyEdaCircuit(combinedSource);
+        const easyDoc = await fetchAndParseEasyEdaCircuit(candidateEasySource);
         if (easyDoc && easyDoc.components && easyDoc.components.length > 0) {
           learnCircuit(easyDoc);
           setPreviewCircuit(easyDoc);
@@ -255,7 +263,8 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
           return;
         }
       } catch (easyErr) {
-        console.warn('[EasyEDA Direct Synthesis Error]:', easyErr);
+        console.warn('[EasyEDA Direct Synthesis]:', easyErr);
+        // Fall through to general AI / Web / Client synthesis so other URLs are synthesized accurately!
       }
     }
 
@@ -268,11 +277,10 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
 
       let serverSuccess = false;
       try {
-        const promptForBackend =
-          effectivePrompt ||
-          (activeImage
-            ? 'Extract all equipment, components, values, and wiring: NodeMCU ESP8266, 4-Channel Relay Module, DHT11 Sensor, IR Receiver 1838, Push Buttons, and 18650 Battery Pack'
-            : 'Extract schematic components, values, and net interconnections from this diagram');
+        const promptForBackend = effectivePrompt || 'Extract schematic components, values, and net interconnections from this diagram';
+
+        const isHttpUrl = cleanPasted.startsWith('http');
+        const isYt = cleanPasted.includes('youtube') || cleanPasted.includes('youtu.be');
 
         const res = await fetch('/api/circuit/generate', {
           method: 'POST',
@@ -280,8 +288,8 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
           body: JSON.stringify({
             prompt: promptForBackend,
             image: activeImage || undefined,
-            url: pastedTextOrUrl.startsWith('http') ? pastedTextOrUrl.trim() : undefined,
-            videoUrl: (pastedTextOrUrl.includes('youtube') || pastedTextOrUrl.includes('youtu.be')) ? pastedTextOrUrl.trim() : undefined,
+            url: isHttpUrl ? cleanPasted : undefined,
+            videoUrl: isYt ? cleanPasted : undefined,
           }),
           signal: controller.signal,
         });
@@ -343,10 +351,8 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
       // 2. If server was offline or had 404/405/5xx, activate enhanced client-side synthesizer
       if (!serverSuccess) {
         setStatusMessage('Synthesizing verified schematic using local EDA rule engine...');
-        const promptToUse = effectivePrompt
-          ? `${effectivePrompt} ${imageFileName || ''}`
-          : (activeImage ? 'ESP8266 NodeMCU 4-Channel Relay Home Automation with DHT11, IR Receiver, 2 Push Buttons, and 18650 Battery Cirkit Designer' : (imageFileName || 'Diagram Schematic'));
-        const clientDoc = synthesizeClientCircuit(promptToUse, imageFileName || 'Diagram Schematic');
+        const promptToUse = effectivePrompt || cleanPasted || cleanPrompt || (imageFileName || 'Diagram Schematic');
+        const clientDoc = synthesizeClientCircuit(promptToUse, imageFileName || cleanPrompt || 'Diagram Schematic');
         const placedClientComps = autoLayoutPcbComponents(clientDoc.components || []);
         const clientRouted = autoRouteSchematicNets(placedClientComps, clientDoc.wires || []);
         const clientFinalWires = (clientRouted.allWires && clientRouted.allWires.length > 0)
@@ -366,7 +372,8 @@ export const LoadDiagramSketchModal: React.FC<LoadDiagramSketchModalProps> = ({
     } catch (err: any) {
       console.error('[Diagram Synthesizer] Error:', err);
       // Fallback guarantees it never fails
-      const fallbackDoc = synthesizeClientCircuit(circuitPrompt || 'ESP8266 NodeMCU 4-Channel Relay Cirkit Designer');
+      const promptToUse = effectivePrompt || cleanPasted || cleanPrompt || 'Electronic Circuit Schematic';
+      const fallbackDoc = synthesizeClientCircuit(promptToUse);
       const placedFallbackComps = autoLayoutPcbComponents(fallbackDoc.components || []);
       const routedFallback = autoRouteSchematicNets(placedFallbackComps, fallbackDoc.wires || []);
       const fallbackFinalWires = (routedFallback.allWires && routedFallback.allWires.length > 0)
